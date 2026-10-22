@@ -5,12 +5,14 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 class TelegramService {
-  static const String botToken = '8754142388:AAGKJUQ9PoeCgrlFNRQQlXEPy4uldnAP_c8';
-  static const String baseUrl = 'https://api.telegram.org/bot$botToken';
-  static const String fileBaseUrl = 'https://api.telegram.org/file/bot$botToken';
+  static String botToken = '8754142388:AAGKJUQ9PoeCgrlFNRQQlXEPy4uldnAP_c8';
+  static String get baseUrl => 'https://api.telegram.org/bot$botToken';
+  static String get fileBaseUrl => 'https://api.telegram.org/file/bot$botToken';
+  static const String cloudBackendUrl = 'https://plan-atsede-teguhan.onrender.com';
   
   static String? savedChatId = '-1004395752939';
   static const String _prefChatIdKey = 'atsede_telegram_chat_id';
+  static const String _prefBotTokenKey = 'atsede_telegram_bot_token';
 
   // የቀጥታ ዥረት (Real-time Stream) ለውይይት
   static final StreamController<List<TelegramLiveMessage>> _messageStreamController =
@@ -23,7 +25,7 @@ class TelegramService {
   static bool _isPollerRunning = false;
   static int? _lastUpdateId;
 
-  /// የተቀመጠውን Chat ID ከአካባቢ ማህደረ-ትውስታ ይጭናል
+  /// የተቀመጠውን Chat ID እና Bot Token ከአካባቢ ማህደረ-ትውስታ ይጭናል
   static Future<void> init() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -31,6 +33,19 @@ class TelegramService {
       if (id != null && id.isNotEmpty) {
         savedChatId = id;
       }
+      final token = prefs.getString(_prefBotTokenKey);
+      if (token != null && token.isNotEmpty) {
+        botToken = token.trim();
+      }
+    } catch (_) {}
+  }
+
+  /// Bot Token ን ቋሚ አድርጎ መመዝገብ
+  static Future<void> saveBotToken(String token) async {
+    botToken = token.trim();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_prefBotTokenKey, botToken);
     } catch (_) {}
   }
 
@@ -89,6 +104,12 @@ class TelegramService {
         final response = await http.get(uri).timeout(const Duration(seconds: 25));
 
         if (!_isPollerRunning) break;
+
+        if (response.statusCode == 401) {
+          debugPrint('Telegram 401: Bot Token is unauthorized or revoked. Please provide a new token from BotFather.');
+          await Future.delayed(const Duration(seconds: 15));
+          continue;
+        }
 
         if (response.statusCode == 200) {
           final data = jsonDecode(response.body);
@@ -312,11 +333,24 @@ class TelegramService {
       );
 
       final data = jsonDecode(response.body);
+      _notifyCloudBackend(text);
       return data['ok'] == true;
     } catch (e) {
       debugPrint('Telegram sendMessage exception: $e');
+      _notifyCloudBackend(text);
       return false;
     }
+  }
+
+  /// የ Render ክላውድ ሰርቨርን በጀርባ ማሳወቅ
+  static Future<void> _notifyCloudBackend(String message) async {
+    try {
+      await http.post(
+        Uri.parse('$cloudBackendUrl/api/send_notice'),
+        headers: {'Content-Type': 'application/json; charset=utf-8'},
+        body: jsonEncode({'message': message, 'chat_id': savedChatId ?? '-1004395752939'}),
+      ).timeout(const Duration(seconds: 4));
+    } catch (_) {}
   }
 
   /// የተዘጋጀ ይፋዊ ፒዲኤፍ (PDF) ሰነድ በቀጥታ ወደ ቴሌግራም መላክ

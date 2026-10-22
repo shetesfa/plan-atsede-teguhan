@@ -2,10 +2,13 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:excel/excel.dart';
 import 'package:flutter/services.dart' show rootBundle;
+import 'package:http/http.dart' as http;
 import '../models/plan_item.dart';
 import '../models/department.dart';
 
 class ExcelImporterService {
+  static const String cloudApiUrl = 'https://plan-atsede-teguhan.onrender.com/api/plans';
+
   static const List<String> monthNames = [
     'መስ', 'ጥቅ', 'ህዳር', 'ታህ', 'ጥር', 'የካ', 'መጋ', 'ሚያ', 'ግን', 'ሰኔ', 'ሐም', 'ነሐ'
   ];
@@ -45,8 +48,23 @@ class ExcelImporterService {
   /// የ 10ሩን ክፍሎች እቅዶች ከ assets/default_plans.json ወይም ከተሰጠ ኤክሴል ባይት ይጭናል
   static Future<List<PlanItem>> loadPlans({Uint8List? fileBytes}) async {
     try {
-      // አዲስ ኤክሴል ፋይል ካልተሰጠ አስቀድሞ የተጠናከረውን JSON እንጠቀማለን (ለፍጥነት እና ለ 10ሩም ክፍሎች ሙሉ እቅድ)
+      // አዲስ ኤክሴል ፋይል ካልተሰጠ
       if (fileBytes == null) {
+        // 1. መጀመሪያ ከ Render የቀጥታ ክላውድ ሰርቨር እቅዶችን ለመጫን ይሞክራል
+        try {
+          final res = await http.get(Uri.parse(cloudApiUrl)).timeout(const Duration(seconds: 4));
+          if (res.statusCode == 200) {
+            final data = json.decode(utf8.decode(res.bodyBytes));
+            if (data['status'] == 'success' && data['data'] is List) {
+              final List list = data['data'];
+              if (list.isNotEmpty) {
+                return list.map((e) => PlanItem.fromJson(e)).toList();
+              }
+            }
+          }
+        } catch (_) {}
+
+        // 2. ክላውድ ካልተገኘ ከአካባቢው default_plans.json ይጭናል (Offline Fallback)
         try {
           final String jsonStr = await rootBundle.loadString('assets/default_plans.json');
           final List<dynamic> jsonList = json.decode(jsonStr);

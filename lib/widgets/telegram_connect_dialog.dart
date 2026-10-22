@@ -19,6 +19,7 @@ class TelegramConnectDialog extends StatefulWidget {
 
 class _TelegramConnectDialogState extends State<TelegramConnectDialog> {
   final TextEditingController _idController = TextEditingController();
+  final TextEditingController _tokenController = TextEditingController();
   bool _isLoading = false;
   List<Map<String, dynamic>> _recentChats = [];
   String? _statusMessage;
@@ -29,6 +30,7 @@ class _TelegramConnectDialogState extends State<TelegramConnectDialog> {
     if (TelegramService.savedChatId != null) {
       _idController.text = TelegramService.savedChatId!;
     }
+    _tokenController.text = TelegramService.botToken;
     _autoDiscover();
   }
 
@@ -54,6 +56,7 @@ class _TelegramConnectDialogState extends State<TelegramConnectDialog> {
 
   Future<void> _saveAndTest() async {
     final text = _idController.text.trim();
+    final token = _tokenController.text.trim();
     if (text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('እባክዎ የቴሌግራም Chat ID ያስገቡ ወይም ከዝርዝሩ ይምረጡ!')),
@@ -62,6 +65,9 @@ class _TelegramConnectDialogState extends State<TelegramConnectDialog> {
     }
 
     setState(() => _isLoading = true);
+    if (token.isNotEmpty) {
+      await TelegramService.saveBotToken(token);
+    }
     await TelegramService.saveChatId(text);
 
     // የሙከራ መልእክት መላክ
@@ -188,6 +194,45 @@ class _TelegramConnectDialogState extends State<TelegramConnectDialog> {
                     style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
                   ),
                 ),
+
+              const SizedBox(height: 12),
+              const Text('የደመና ሰርቨር (Cloud Backend)፦', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+              const SizedBox(height: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.green.shade50,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: Colors.green.shade300),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.cloud_done, size: 16, color: Colors.green),
+                    SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'https://plan-atsede-teguhan.onrender.com (Online)',
+                        style: TextStyle(fontSize: 11, color: Colors.green, fontWeight: FontWeight.bold),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 12),
+              const Text('የቴሌግራም Bot Token፦', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+              const SizedBox(height: 6),
+              TextField(
+                controller: _tokenController,
+                keyboardType: TextInputType.text,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  hintText: 'አዲስ የ Bot Token ከ @BotFather...',
+                  border: OutlineInputBorder(),
+                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                ),
+              ),
 
               const SizedBox(height: 12),
               const Text('የቴሌግራም Chat ID (ወይም ከላይ ይምረጡ)፦', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
