@@ -25,69 +25,115 @@ class DashboardScreen extends StatelessWidget {
     required this.onOpenUnplanned,
   });
 
-  void _showNotificationsSheet(BuildContext context, List<PlanItem> overduePlans, List<PlanItem> postponedPlans, List<PlanItem> reportedPlans) {
+  void _showNotificationsSheet(
+    BuildContext context,
+    List<PlanItem> overduePlans,
+    List<PlanItem> postponedPlans,
+    List<PlanItem> reportedPlans,
+  ) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      backgroundColor: Colors.transparent,
       builder: (ctx) {
-        return DefaultTabController(
-          length: 3,
-          child: Container(
-            height: MediaQuery.of(context).size.height * 0.75,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        return Container(
+          height: MediaQuery.of(context).size.height * 0.78,
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: DefaultTabController(
+            length: 3,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Row(
-                      children: [
-                        Icon(Icons.notifications_active, color: AppTheme.primaryMaroon),
-                        SizedBox(width: 8),
-                        Text(
-                          'የማሳወቂያ ማዕከል (Notifications)',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.primaryMaroon),
-                        ),
-                      ],
+                Center(
+                  child: Container(
+                    margin: const EdgeInsets.only(top: 12, bottom: 8),
+                    width: 44,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(10),
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () => Navigator.pop(ctx),
-                    ),
-                  ],
+                  ),
                 ),
-                const Divider(),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: AppTheme.primaryMaroon.withAlpha(25),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.notifications_active, color: AppTheme.primaryMaroon, size: 22),
+                          ),
+                          const SizedBox(width: 12),
+                          const Text(
+                            'የማሳወቂያ ማዕከል',
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: AppTheme.primaryMaroon),
+                          ),
+                        ],
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close, color: AppTheme.textMuted),
+                        onPressed: () => Navigator.pop(ctx),
+                      ),
+                    ],
+                  ),
+                ),
                 TabBar(
                   labelColor: AppTheme.primaryMaroon,
                   indicatorColor: AppTheme.primaryMaroon,
+                  indicatorWeight: 3,
+                  labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  unselectedLabelColor: AppTheme.textMuted,
                   tabs: [
                     Tab(text: '🚨 ያዘገዩ (${overduePlans.length})'),
                     Tab(text: '📅 የተላለፉ (${postponedPlans.length})'),
                     Tab(text: '📋 ሪፖርቶች (${reportedPlans.length})'),
                   ],
                 ),
-                const SizedBox(height: 10),
+                const Divider(height: 1),
                 Expanded(
                   child: TabBarView(
                     children: [
                       // 1. ያዘገዩ
                       overduePlans.isEmpty
-                          ? const Center(child: Text('ምንም ያዘገየ እቅድ የለም! ሁሉም በጥሩ ሁኔታ ላይ ነው።'))
+                          ? _buildEmptyState('ምንም ያዘገየ እቅድ የለም! ሁሉም በሰዓቱ እየተከናወነ ነው።', Icons.check_circle_outline)
                           : ListView.builder(
+                              padding: const EdgeInsets.all(16),
                               itemCount: overduePlans.length,
                               itemBuilder: (c, i) {
                                 final p = overduePlans[i];
-                                return Card(
-                                  margin: const EdgeInsets.only(bottom: 8),
-                                  color: Colors.red.shade50,
+                                return Container(
+                                  margin: const EdgeInsets.only(bottom: 10),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.redBg,
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(color: AppTheme.redDanger.withAlpha(50)),
+                                  ),
                                   child: ListTile(
-                                    title: Text(p.detailTask.isNotEmpty ? p.detailTask : p.mainTask, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                                    subtitle: Text('ክፍል፦ ${p.departmentName} | የመጀመሪያ ጊዜ፦ ${p.executionTime}', style: const TextStyle(fontSize: 11)),
-                                    trailing: const Icon(Icons.alarm, color: Colors.red, size: 20),
+                                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                                    leading: const CircleAvatar(
+                                      backgroundColor: AppTheme.redDanger,
+                                      child: Icon(Icons.alarm, color: Colors.white, size: 20),
+                                    ),
+                                    title: Text(p.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                    subtitle: Text(
+                                      'ክፍል፦ ${p.departmentName}\nየማስፈጸሚያ ወር፦ መስከረም / ጥቅምት',
+                                      style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+                                    ),
+                                    trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: AppTheme.redDanger),
+                                    onTap: () {
+                                      Navigator.pop(ctx);
+                                      onSelectDepartment(p.departmentId);
+                                    },
                                   ),
                                 );
                               },
@@ -95,42 +141,61 @@ class DashboardScreen extends StatelessWidget {
 
                       // 2. የተላለፉ
                       postponedPlans.isEmpty
-                          ? const Center(child: Text('ምንም የተላለፈ እቅድ አልተመዘገበም።'))
+                          ? _buildEmptyState('የተላለፈ እቅድ አልተገኘም።', Icons.calendar_today_outlined)
                           : ListView.builder(
+                              padding: const EdgeInsets.all(16),
                               itemCount: postponedPlans.length,
                               itemBuilder: (c, i) {
                                 final p = postponedPlans[i];
-                                return Card(
-                                  margin: const EdgeInsets.only(bottom: 8),
-                                  color: Colors.orange.shade50,
+                                return Container(
+                                  margin: const EdgeInsets.only(bottom: 10),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.amberBg,
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(color: AppTheme.amberWarning.withAlpha(50)),
+                                  ),
                                   child: ListTile(
-                                    title: Text(p.detailTask.isNotEmpty ? p.detailTask : p.mainTask, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                                    subtitle: Text('ክፍል፦ ${p.departmentName}\n👉 አዲስ ቀን፦ ${p.postponedDate} (${p.postponeReason ?? ""})', style: const TextStyle(fontSize: 11)),
-                                    trailing: const Icon(Icons.update, color: Colors.deepOrange, size: 20),
+                                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                                    leading: const CircleAvatar(
+                                      backgroundColor: AppTheme.amberWarning,
+                                      child: Icon(Icons.update, color: Colors.white, size: 20),
+                                    ),
+                                    title: Text(p.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                    subtitle: Text(
+                                      'ክፍል፦ ${p.departmentName}\nአዲስ ቀን፦ ${p.postponedDate ?? "ያልተጠቀሰ"}\nምክንያት፦ ${p.postponeReason ?? "ያልተገለጸ"}',
+                                      style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+                                    ),
                                   ),
                                 );
                               },
                             ),
 
-                      // 3. ሪፖርቶች
+                      // 3. የቀረቡ ሪፖርቶች
                       reportedPlans.isEmpty
-                          ? const Center(child: Text('እስካሁን የቀረበ አዲስ ሪፖርት የለም።'))
+                          ? _buildEmptyState('እስካሁን የቀረበ ሪፖርት የለም።', Icons.description_outlined)
                           : ListView.builder(
+                              padding: const EdgeInsets.all(16),
                               itemCount: reportedPlans.length,
                               itemBuilder: (c, i) {
                                 final p = reportedPlans[i];
-                                return Card(
-                                  margin: const EdgeInsets.only(bottom: 8),
-                                  color: Colors.green.shade50,
+                                return Container(
+                                  margin: const EdgeInsets.only(bottom: 10),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.greenBg,
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(color: AppTheme.greenSuccess.withAlpha(50)),
+                                  ),
                                   child: ListTile(
-                                    title: Text(p.detailTask.isNotEmpty ? p.detailTask : p.mainTask, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                                    subtitle: Text(
-                                      'ክፍል፦ ${p.departmentName} (${p.progressPercent}%)\n'
-                                      '${p.reportDetails != null && p.reportDetails!.isNotEmpty ? "የተሰራ፦ ${p.reportDetails}\n" : ""}'
-                                      '${p.notDoneDetails != null && p.notDoneDetails!.isNotEmpty ? "ምክንያት፦ ${p.notDoneDetails}" : ""}',
-                                      style: const TextStyle(fontSize: 11),
+                                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                                    leading: const CircleAvatar(
+                                      backgroundColor: AppTheme.greenSuccess,
+                                      child: Icon(Icons.done_all, color: Colors.white, size: 20),
                                     ),
-                                    trailing: const Icon(Icons.check_circle, color: Colors.green, size: 20),
+                                    title: Text(p.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                    subtitle: Text(
+                                      'ክፍል፦ ${p.departmentName}\nየተከናወነ፦ ${p.doneDetails ?? "ዝርዝር አለ"}\nደረጃ፦ ${p.progressPercent}% ተጠናቋል',
+                                      style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
+                                    ),
                                   ),
                                 );
                               },
@@ -146,22 +211,44 @@ class DashboardScreen extends StatelessWidget {
     );
   }
 
+  Widget _buildEmptyState(String text, IconData icon) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 48, color: AppTheme.textMuted.withAlpha(120)),
+            const SizedBox(height: 12),
+            Text(
+              text,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: AppTheme.textMuted, fontSize: 13),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final currentDept = AuthService.currentDepartment;
     final isSuper = AuthService.isSuperAdmin;
 
-    // ለክፍል ተጠቃሚ ከሆነ የራሱን እቅዶች ብቻ ይመርጣል፤ ለፅ/ቤት ከሆነ ሁሉንም
     final visiblePlans = isSuper
         ? plans
-        : plans.where((p) => p.departmentName.contains(currentDept?.shortName ?? '') || p.departmentId == currentDept?.id).toList();
+        : plans
+            .where((p) =>
+                p.departmentName.contains(currentDept?.shortName ?? '') ||
+                p.departmentId == currentDept?.id)
+            .toList();
 
     final totalPlans = visiblePlans.length;
     final completedPlans = visiblePlans.where((p) => p.isCompleted).length;
     final inProgressPlans = visiblePlans.where((p) => p.isInProgress).length;
     final overallPercent = totalPlans > 0 ? ((completedPlans / totalPlans) * 100).toInt() : 0;
 
-    // የተላለፉ፣ ያዘገዩ እና ሪፖርት ያላቸው
     final postponedPlans = visiblePlans.where((p) => p.isPostponed).toList();
     final reportedPlans = visiblePlans.where((p) => p.hasReport || p.progressPercent > 0).toList();
     final overduePlans = visiblePlans.where((p) {
@@ -175,15 +262,16 @@ class DashboardScreen extends StatelessWidget {
     final totalUnplanned = unplannedActivities.length;
 
     return Scaffold(
+      backgroundColor: AppTheme.surfaceBg,
       appBar: AppBar(
         title: Text(isSuper ? 'የፅ/ቤት ማዕከላዊ መቆጣጠሪያ' : '${currentDept?.name}'),
         actions: [
-          // የማሳወቂያ ደወል ከቁጥር ባጅ ጋር
+          // የማሳወቂያ ደወል
           Stack(
             alignment: Alignment.center,
             children: [
               IconButton(
-                icon: const Icon(Icons.notifications_none, color: Colors.white),
+                icon: const Icon(Icons.notifications_outlined, color: Colors.white),
                 tooltip: 'ማሳወቂያዎች',
                 onPressed: () => _showNotificationsSheet(context, overduePlans, postponedPlans, reportedPlans),
               ),
@@ -194,13 +282,13 @@ class DashboardScreen extends StatelessWidget {
                   child: Container(
                     padding: const EdgeInsets.all(4),
                     decoration: const BoxDecoration(
-                      color: Colors.redAccent,
+                      color: AppTheme.brightGold,
                       shape: BoxShape.circle,
                     ),
                     constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
                     child: Text(
                       '$totalNotifications',
-                      style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                      style: const TextStyle(color: AppTheme.darkMaroon, fontSize: 10, fontWeight: FontWeight.bold),
                       textAlign: TextAlign.center,
                     ),
                   ),
@@ -225,38 +313,41 @@ class DashboardScreen extends StatelessWidget {
         ],
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // የራስጌ ማራኪ ባነር
+            // 🌟 1. ፕሪሚየም የራስጌ ባነር (Hero Executive Banner)
             Container(
-              padding: const EdgeInsets.all(18),
+              padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
                 gradient: AppTheme.primaryGradient,
-                borderRadius: BorderRadius.circular(18),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppTheme.primaryMaroon.withAlpha(70),
-                    blurRadius: 14,
-                    offset: const Offset(0, 5),
-                  ),
-                ],
+                borderRadius: BorderRadius.circular(22),
+                boxShadow: AppTheme.primaryGlow,
               ),
               child: Row(
                 children: [
                   Container(
-                    width: 65,
-                    height: 65,
+                    width: 68,
+                    height: 68,
                     decoration: BoxDecoration(
                       color: Colors.white,
                       shape: BoxShape.circle,
-                      border: Border.all(color: AppTheme.secondaryGold, width: 2),
+                      border: Border.all(color: AppTheme.secondaryGold, width: 2.5),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withAlpha(40),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
                     ),
                     padding: const EdgeInsets.all(4),
-                    child: Image.asset('assets/icon.png', fit: BoxFit.contain),
+                    child: ClipOval(
+                      child: Image.asset('assets/icon.png', fit: BoxFit.contain),
+                    ),
                   ),
-                  const SizedBox(width: 14),
+                  const SizedBox(width: 16),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -267,26 +358,43 @@ class DashboardScreen extends StatelessWidget {
                             color: Colors.white,
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
+                            letterSpacing: 0.2,
                           ),
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          isSuper ? 'የ10ሩ ክፍሎች የ2019 ዓ.ም የቁጥጥር ዳሽቦርድ' : 'የክፍሉ የ2019 ዓ.ም የስራ አፈፃፀም',
+                          isSuper ? 'የ10ሩ ክፍላት የ2019 ዓ.ም ማዕከላዊ ቁጥጥር' : 'የክፍሉ የ2019 ዓ.ም የስራ አፈፃፀም',
                           style: const TextStyle(color: AppTheme.lightGold, fontSize: 12),
                         ),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 10),
+                        // የአፈፃፀም ባር
                         Row(
                           children: [
-                            const Text('አጠቃላይ ክንውን፡ ', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                            Expanded(
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: LinearProgressIndicator(
+                                  value: totalPlans > 0 ? (completedPlans / totalPlans) : 0,
+                                  backgroundColor: Colors.white24,
+                                  valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.brightGold),
+                                  minHeight: 8,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                               decoration: BoxDecoration(
-                                gradient: AppTheme.goldGradient,
+                                color: AppTheme.secondaryGold,
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Text(
                                 '$overallPercent%',
-                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
                               ),
                             ),
                           ],
@@ -299,21 +407,72 @@ class DashboardScreen extends StatelessWidget {
             ),
             const SizedBox(height: 18),
 
-            // ለፅ/ቤት የሚታይ አዲስ ሪፖርት እና ማስተላለፍ ማሳወቂያ ባነር
+            // ⚡ 2. ፈጣን ተግባራት (Quick Actions Grid)
+            Row(
+              children: [
+                _buildQuickAction(
+                  context,
+                  title: 'Word ጽሑፍ',
+                  subtitle: 'ሪፖርት/ደብዳቤ',
+                  icon: Icons.article_rounded,
+                  color: const Color(0xFF2B579A),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (ctx) => const DocumentEditorScreen(initialTabIndex: 0)),
+                    );
+                  },
+                ),
+                const SizedBox(width: 10),
+                _buildQuickAction(
+                  context,
+                  title: 'Excel ሰንጠረዥ',
+                  subtitle: 'በጀት/ሒሳብ',
+                  icon: Icons.table_chart_rounded,
+                  color: const Color(0xFF217346),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (ctx) => const DocumentEditorScreen(initialTabIndex: 1)),
+                    );
+                  },
+                ),
+                const SizedBox(width: 10),
+                _buildQuickAction(
+                  context,
+                  title: 'ያልታቀዱ',
+                  subtitle: '$totalUnplanned ስራዎች',
+                  icon: Icons.add_task_rounded,
+                  color: AppTheme.primaryMaroon,
+                  onTap: onOpenUnplanned,
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+
+            // 🚨 3. የማሳወቂያ ማጠቃለያ ባነር
             InkWell(
               onTap: () => _showNotificationsSheet(context, overduePlans, postponedPlans, reportedPlans),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(16),
               child: Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: AppTheme.lightGold,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppTheme.secondaryGold),
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppTheme.secondaryGold.withAlpha(90)),
+                  boxShadow: AppTheme.cardShadow,
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.notifications_active, color: AppTheme.primaryMaroon, size: 24),
-                    const SizedBox(width: 10),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppTheme.lightGold,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(Icons.flash_on_rounded, color: AppTheme.secondaryGold, size: 22),
+                    ),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -322,156 +481,66 @@ class DashboardScreen extends StatelessWidget {
                             'የእቅድ ክትትል እና የማሳወቂያ ማዕከል',
                             style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.primaryMaroon),
                           ),
+                          const SizedBox(height: 2),
                           Text(
-                            '${reportedPlans.length} ሪፖርቶች ቀርበዋል | ${postponedPlans.length} እቅዶች ተላልፈዋል | ${overduePlans.length} ያዘገዩ አሉ (ዝርዝሩን ለማየት ይጫኑ)',
-                            style: const TextStyle(fontSize: 12),
+                            '${reportedPlans.length} ሪፖርቶች ቀርበዋል | ${postponedPlans.length} ተላልፈዋል | ${overduePlans.length} ያዘገዩ አሉ',
+                            style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                           ),
                         ],
                       ),
                     ),
-                    const Icon(Icons.chevron_right, color: AppTheme.primaryMaroon),
+                    const Icon(Icons.arrow_forward_ios, size: 14, color: AppTheme.primaryMaroon),
                   ],
                 ),
               ),
             ),
             const SizedBox(height: 18),
 
-            // አጭር ስታቲስቲክስ ካርዶች (ረድፍ 1)
+            // 📊 4. ዘመናዊ KPI ስታቲስቲክስ ካርዶች
+            const Text(
+              'የአፈፃፀም ማጠቃለያ ቁጥሮች',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppTheme.primaryMaroon),
+            ),
+            const SizedBox(height: 10),
             Row(
               children: [
-                _buildStatCard('የታቀዱ እቅዶች', '$totalPlans', Icons.list_alt, AppTheme.primaryMaroon),
+                _buildModernStatCard('ጠቅላላ እቅዶች', '$totalPlans', Icons.list_alt_rounded, AppTheme.primaryMaroon, AppTheme.surfaceBg),
                 const SizedBox(width: 10),
-                _buildStatCard('የተጠናቀቁ', '$completedPlans', Icons.check_circle_outline, AppTheme.greenSuccess),
+                _buildModernStatCard('የተጠናቀቁ', '$completedPlans', Icons.check_circle_rounded, AppTheme.greenSuccess, AppTheme.greenBg),
                 const SizedBox(width: 10),
-                _buildStatCard('በሂደት ላይ', '$inProgressPlans', Icons.timelapse, AppTheme.secondaryGold),
+                _buildModernStatCard('በሂደት ላይ', '$inProgressPlans', Icons.timelapse_rounded, AppTheme.amberWarning, AppTheme.amberBg),
               ],
             ),
             const SizedBox(height: 10),
-
-            // አጭር ስታቲስቲክስ ካርዶች (ረድፍ 2፦ የተላለፉ፣ ሪፖርቶች፣ ያዘገዩ)
             Row(
               children: [
-                _buildStatCard('የተላለፉ እቅዶች', '${postponedPlans.length}', Icons.update, Colors.deepOrange),
+                _buildModernStatCard('የተላለፉ', '${postponedPlans.length}', Icons.update_rounded, AppTheme.purpleAccent, AppTheme.purpleBg),
                 const SizedBox(width: 10),
-                _buildStatCard('የቀረቡ ሪፖርቶች', '${reportedPlans.length}', Icons.assignment_turned_in, Colors.teal),
+                _buildModernStatCard('ሪፖርቶች', '${reportedPlans.length}', Icons.assignment_turned_in_rounded, AppTheme.blueInfo, AppTheme.blueBg),
                 const SizedBox(width: 10),
-                _buildStatCard('ያዘገዩ (Overdue)', '${overduePlans.length}', Icons.alarm, overduePlans.isNotEmpty ? Colors.red : Colors.grey),
+                _buildModernStatCard('ያዘገዩ', '${overduePlans.length}', Icons.alarm_rounded, overduePlans.isNotEmpty ? AppTheme.redDanger : AppTheme.textMuted, overduePlans.isNotEmpty ? AppTheme.redBg : AppTheme.surfaceBg),
               ],
             ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 24),
 
-            // ያልታቀዱ ግን የተከናወኑ ስራዎች ካርድ
-            Card(
-              elevation: 2,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-                side: BorderSide(color: AppTheme.secondaryGold.withAlpha(80), width: 1),
-              ),
-              child: ListTile(
-                onTap: onOpenUnplanned,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                leading: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: AppTheme.lightGold,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Icon(Icons.add_task, color: AppTheme.primaryMaroon, size: 24),
-                ),
-                title: const Text(
-                  'ያልታቀዱ ግን የተከናወኑ ስራዎች',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                ),
-                subtitle: Text(
-                  'በዓመታዊ እቅድ ውስጥ ያልነበሩ ነገር ግን የተሰሩ ተግባራት ($totalUnplanned ተመዝግበዋል)',
-                  style: const TextStyle(fontSize: 12),
-                ),
-                trailing: const Icon(Icons.arrow_forward_ios, size: 14),
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            // ፈጣን የሰነድ እና ሰንጠረዥ (Word & Excel) ማዘጋጃ ካርዶች
-            Row(
-              children: [
-                Expanded(
-                  child: InkWell(
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (ctx) => const DocumentEditorScreen(initialTabIndex: 0)),
-                      );
-                    },
-                    borderRadius: BorderRadius.circular(12),
-                    child: Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF2B579A).withAlpha(15),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: const Color(0xFF2B579A).withAlpha(40)),
-                      ),
-                      child: const Row(
-                        children: [
-                          Icon(Icons.description, color: Color(0xFF2B579A), size: 24),
-                          SizedBox(width: 8),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text('Word ጽሑፍ ጻፍ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF2B579A))),
-                                Text('ሪፖርት / ቃለ-ጉባኤ', style: TextStyle(fontSize: 10, color: Colors.black54)),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: InkWell(
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (ctx) => const DocumentEditorScreen(initialTabIndex: 1)),
-                      );
-                    },
-                    borderRadius: BorderRadius.circular(12),
-                    child: Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF217346).withAlpha(15),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: const Color(0xFF217346).withAlpha(40)),
-                      ),
-                      child: const Row(
-                        children: [
-                          Icon(Icons.table_chart_rounded, color: Color(0xFF217346), size: 24),
-                          SizedBox(width: 8),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text('Excel ሰንጠረዥ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF217346))),
-                                Text('በጀት / Auto-sum', style: TextStyle(fontSize: 10, color: Colors.black54)),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 22),
-
-            // ፅ/ቤት ከሆነ የ10ሩ ክፍሎች ዝርዝር
+            // 🏛 5. የ 10ሩ ክፍላት የደረጃ ሰንጠረዥ (ለፅ/ቤት)
             if (isSuper) ...[
-              const Text(
-                'የ 10ሩ ክፍላት የክንውን ደረጃ እና ዝርዝር እቅድ',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.primaryMaroon),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'የ 10ሩ ክፍላት የአፈፃፀም ደረጃ',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: AppTheme.primaryMaroon),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primaryMaroon.withAlpha(15),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Text('2019 ዓ.ም', style: TextStyle(color: AppTheme.primaryMaroon, fontSize: 11, fontWeight: FontWeight.bold)),
+                  ),
+                ],
               ),
               const SizedBox(height: 12),
               ListView.builder(
@@ -485,19 +554,42 @@ class DashboardScreen extends StatelessWidget {
                   final deptPostponed = deptPlans.where((p) => p.isPostponed).length;
                   final deptPercent = deptPlans.isNotEmpty ? ((deptCompleted / deptPlans.length) * 100).toInt() : 0;
 
-                  return Card(
+                  // የሜዳሊያ ወይም የደረጃ ምልክት
+                  String badge = '${index + 1}';
+                  Color badgeBg = AppTheme.primaryMaroon.withAlpha(20);
+                  Color badgeColor = AppTheme.primaryMaroon;
+                  if (index == 0) {
+                    badge = '🥇';
+                    badgeBg = const Color(0xFFFFD700).withAlpha(50);
+                  } else if (index == 1) {
+                    badge = '🥈';
+                    badgeBg = const Color(0xFFC0C0C0).withAlpha(50);
+                  } else if (index == 2) {
+                    badge = '🥉';
+                    badgeBg = const Color(0xFFCD7F32).withAlpha(50);
+                  }
+
+                  return Container(
                     margin: const EdgeInsets.only(bottom: 10),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      side: BorderSide(color: Colors.grey.shade200),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppTheme.borderLight),
+                      boxShadow: AppTheme.cardShadow,
                     ),
                     child: ListTile(
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                      leading: CircleAvatar(
-                        backgroundColor: AppTheme.primaryMaroon.withAlpha(20),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      leading: Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: badgeBg,
+                          shape: BoxShape.circle,
+                        ),
+                        alignment: Alignment.center,
                         child: Text(
-                          '${index + 1}',
-                          style: const TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryMaroon),
+                          badge,
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: index < 3 ? 16 : 13, color: badgeColor),
                         ),
                       ),
                       title: Text(dept.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
@@ -507,27 +599,40 @@ class DashboardScreen extends StatelessWidget {
                           const SizedBox(height: 4),
                           Text(
                             'ጠቅላላ እቅድ፡ ${deptPlans.length} | የተጠናቀቁ፡ $deptCompleted${deptPostponed > 0 ? " | የተላለፉ: $deptPostponed" : ""}',
-                            style: const TextStyle(fontSize: 11),
+                            style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                           ),
-                          const SizedBox(height: 4),
-                          LinearProgressIndicator(
-                            value: deptPlans.isNotEmpty ? (deptCompleted / deptPlans.length) : 0,
-                            backgroundColor: Colors.grey.shade200,
-                            color: deptPercent == 100 ? AppTheme.greenSuccess : AppTheme.secondaryGold,
-                            minHeight: 5,
-                            borderRadius: BorderRadius.circular(5),
+                          const SizedBox(height: 6),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: LinearProgressIndicator(
+                              value: deptPlans.isNotEmpty ? (deptCompleted / deptPlans.length) : 0,
+                              backgroundColor: Colors.grey.shade100,
+                              color: deptPercent == 100 ? AppTheme.greenSuccess : AppTheme.secondaryGold,
+                              minHeight: 6,
+                            ),
                           ),
                         ],
                       ),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text(
-                            '$deptPercent%',
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppTheme.primaryMaroon),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: deptPercent == 100 ? AppTheme.greenBg : AppTheme.surfaceBg,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              '$deptPercent%',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
+                                color: deptPercent == 100 ? AppTheme.greenSuccess : AppTheme.primaryMaroon,
+                              ),
+                            ),
                           ),
                           const SizedBox(width: 4),
-                          const Icon(Icons.arrow_forward_ios, size: 12, color: Colors.grey),
+                          const Icon(Icons.arrow_forward_ios, size: 12, color: AppTheme.textMuted),
                         ],
                       ),
                       onTap: () => onSelectDepartment(dept.id),
@@ -542,30 +647,78 @@ class DashboardScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildStatCard(String title, String value, IconData icon, Color color) {
+  Widget _buildQuickAction(
+    BuildContext context, {
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: color.withAlpha(40)),
+            boxShadow: AppTheme.cardShadow,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: color.withAlpha(20),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: color, size: 20),
+              ),
+              const SizedBox(height: 8),
+              Text(title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: color)),
+              const SizedBox(height: 2),
+              Text(subtitle, style: const TextStyle(fontSize: 10, color: AppTheme.textMuted), maxLines: 1, overflow: TextOverflow.ellipsis),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildModernStatCard(String title, String value, IconData icon, Color color, Color bgColor) {
     return Expanded(
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withAlpha(50)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withAlpha(10),
-              blurRadius: 4,
-              offset: const Offset(0, 2),
-            ),
-          ],
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.withAlpha(40)),
+          boxShadow: AppTheme.cardShadow,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, color: color, size: 20),
-            const SizedBox(height: 6),
-            Text(value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: color)),
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: bgColor,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(icon, color: color, size: 18),
+            ),
+            const SizedBox(height: 8),
+            Text(value, style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: color)),
             const SizedBox(height: 2),
-            Text(title, style: const TextStyle(fontSize: 10, color: AppTheme.textMuted), maxLines: 1, overflow: TextOverflow.ellipsis),
+            Text(
+              title,
+              style: const TextStyle(fontSize: 10, color: AppTheme.textSecondary, fontWeight: FontWeight.w600),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
           ],
         ),
       ),

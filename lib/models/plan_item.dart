@@ -55,6 +55,8 @@ class PlanItem {
   bool get isCompleted => progressPercent == 100;
   bool get isInProgress => progressPercent > 0 && progressPercent < 100;
   bool get isNotStarted => progressPercent == 0;
+  String get title => detailTask.isNotEmpty ? detailTask : mainTask;
+  String? get doneDetails => reportDetails;
 
   bool get isPostponed => postponedDate != null && postponedDate!.trim().isNotEmpty;
   bool get hasReport =>
