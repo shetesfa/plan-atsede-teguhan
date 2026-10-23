@@ -6,8 +6,8 @@ services:
     startCommand: python bot_server.py
     envVars:
       - key: BOT_TOKEN
-        value: 8754142388:AAGKJUQ9PoeCgrlFNRQQlXEPy4uldnAP_c8
+        value: 8787655703:AAEKUtBab8oi8rIUiwnV3n7HMDpTW63Cehk
       - key: CHAT_ID
-        value: -1004395752939
+        value: 1537845176
       - key: PORT
         value: 10000

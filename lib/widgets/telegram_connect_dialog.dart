@@ -46,7 +46,7 @@ class _TelegramConnectDialogState extends State<TelegramConnectDialog> {
         _isLoading = false;
         _recentChats = chats;
         if (chats.isEmpty) {
-          _statusMessage = 'እስካሁን ቦቱን ያናገረ ግሩፕ ወይም ተጠቃሚ አልተገኘም።\nእባክዎ @atsede_leaders_bot ላይ መልእክት ይላኩ ወይም ግሩፕ ውስጥ Add ያድርጉት።';
+          _statusMessage = 'እስካሁን ቦቱን ያናገረ ግሩፕ ወይም ተጠቃሚ አልተገኘም።\nእባክዎ @atsedetestsystembot ላይ መልእክት ይላኩ ወይም ግሩፕ ውስጥ Add ያድርጉት።';
         } else {
           _statusMessage = '${chats.length} ንቁ የቴሌግራም ውይይት(ቶች) ተገኝተዋል!';
         }
@@ -124,12 +124,12 @@ class _TelegramConnectDialogState extends State<TelegramConnectDialog> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'የቦቱ መለያ፦ @atsede_leaders_bot',
+                      'የቦቱ መለያ፦ @atsedetestsystembot',
                       style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF0088CC)),
                     ),
                     SizedBox(height: 4),
                     Text(
-                      '1. በቴሌግራም @atsede_leaders_bot ብለው ፈልገው Start ይበሉት ወይም ወደ ግሩፕ Add ያድርጉት።\n2. ከታች «በራስ-ሰር ፈልግ» የሚለውን ይጫኑ።',
+                      '1. በቴሌግራም @atsedetestsystembot ብለው ፈልገው Start ይበሉት ወይም ወደ ግሩፕ Add ያድርጉት።\n2. ከታች «በራስ-ሰር ፈልግ» የሚለውን ይጫኑ።',
                       style: TextStyle(fontSize: 11),
                     ),
                   ],

@@ -4,7 +4,7 @@ import json
 import time
 import threading
 import requests
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, Response
 
 # ኮንሶል የ UTF-8 ፊደላትንና ኢሞጂዎችን በትክክል እንዲያሳይ
 if hasattr(sys.stdout, 'reconfigure'):
@@ -15,12 +15,19 @@ if hasattr(sys.stderr, 'reconfigure'):
 # ==============================================================
 # የቴሌግራም ቦት ውቅር (Bot Configuration)
 # ==============================================================
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8754142388:AAGKJUQ9PoeCgrlFNRQQlXEPy4uldnAP_c8")
-CHAT_ID = os.environ.get("CHAT_ID", "-1004395752939")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8787655703:AAEKUtBab8oi8rIUiwnV3n7HMDpTW63Cehk")
+CHAT_ID = os.environ.get("CHAT_ID", "1537845176")
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 # Flask Web Server (ለ Render.com እና ለሌሎች ነፃ ሆስቲንጎች 24/7 ጤናማ መሆኑን ማሳወቂያ)
 app = Flask(__name__)
+
+@app.after_request
+def add_cors_headers(response):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+    response.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
+    return response
 
 PLANS_CACHE = []
 
@@ -49,6 +56,7 @@ def home():
         "status": "online",
         "service": "Atsede Teguhan Telegram Bot & API Server",
         "bot_active": True,
+        "bot_token_prefix": BOT_TOKEN[:10] + "...",
         "plans_count": len(PLANS_CACHE),
         "chat_id": CHAT_ID
     })
@@ -66,24 +74,126 @@ def get_plans():
         return jsonify({"status": "success", "count": len(filtered), "data": filtered})
     return jsonify({"status": "success", "count": len(PLANS_CACHE), "data": PLANS_CACHE})
 
-@app.route("/api/send_notice", methods=["POST"])
+# ==============================================================
+# Telegram Proxy API (ለ Flutter Web & Mobile ግንኙነት አስተማማኝ ድልድይ)
+# ==============================================================
+@app.route("/api/send_notice", methods=["POST", "OPTIONS"])
 def send_notice():
     """ከመተግበሪያው የሚመጣ ማሳወቂያ ወይም ሪፖርት ወደ ቴሌግራም ይልካል"""
+    if request.method == "OPTIONS":
+        return "", 200
     body = request.get_json(silent=True) or {}
     message = body.get("message", "")
-    chat_id = body.get("chat_id", CHAT_ID)
+    target_chat = body.get("chat_id") or CHAT_ID
     if not message:
         return jsonify({"error": "መልእክት አልተሰጠም"}), 400
     
     try:
         res = requests.post(f"{BASE_URL}/sendMessage", json={
-            "chat_id": chat_id,
+            "chat_id": target_chat,
             "text": message,
             "parse_mode": "HTML"
-        }, timeout=10)
-        return jsonify(res.json())
+        }, timeout=12)
+        return jsonify(res.json()), res.status_code
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(e), "ok": False}), 500
+
+@app.route("/api/telegram/sendMessage", methods=["POST", "OPTIONS"])
+def proxy_send_message():
+    if request.method == "OPTIONS":
+        return "", 200
+    body = request.get_json(silent=True) or {}
+    target_chat = body.get("chat_id") or CHAT_ID
+    text = body.get("text", "")
+    parse_mode = body.get("parse_mode", "HTML")
+    custom_token = body.get("bot_token")
+    url = f"https://api.telegram.org/bot{custom_token or BOT_TOKEN}/sendMessage"
+    try:
+        res = requests.post(url, json={
+            "chat_id": target_chat,
+            "text": text,
+            "parse_mode": parse_mode
+        }, timeout=15)
+        return jsonify(res.json()), res.status_code
+    except Exception as e:
+        return jsonify({"ok": False, "description": str(e)}), 500
+
+@app.route("/api/telegram/sendDocument", methods=["POST", "OPTIONS"])
+def proxy_send_document():
+    if request.method == "OPTIONS":
+        return "", 200
+    try:
+        chat_id = request.form.get("chat_id") or CHAT_ID
+        caption = request.form.get("caption", "")
+        custom_token = request.form.get("bot_token")
+        url = f"https://api.telegram.org/bot{custom_token or BOT_TOKEN}/sendDocument"
+        
+        files = {}
+        for key, f in request.files.items():
+            files[key] = (f.filename, f.stream, f.mimetype)
+            
+        data = {"chat_id": chat_id}
+        if caption:
+            data["caption"] = caption
+            data["parse_mode"] = "HTML"
+
+        res = requests.post(url, data=data, files=files, timeout=30)
+        return jsonify(res.json()), res.status_code
+    except Exception as e:
+        return jsonify({"ok": False, "description": str(e)}), 500
+
+@app.route("/api/telegram/sendPhoto", methods=["POST", "OPTIONS"])
+def proxy_send_photo():
+    if request.method == "OPTIONS":
+        return "", 200
+    try:
+        chat_id = request.form.get("chat_id") or CHAT_ID
+        caption = request.form.get("caption", "")
+        custom_token = request.form.get("bot_token")
+        url = f"https://api.telegram.org/bot{custom_token or BOT_TOKEN}/sendPhoto"
+        
+        files = {}
+        for key, f in request.files.items():
+            files[key] = (f.filename, f.stream, f.mimetype)
+            
+        data = {"chat_id": chat_id}
+        if caption:
+            data["caption"] = caption
+            data["parse_mode"] = "HTML"
+
+        res = requests.post(url, data=data, files=files, timeout=30)
+        return jsonify(res.json()), res.status_code
+    except Exception as e:
+        return jsonify({"ok": False, "description": str(e)}), 500
+
+@app.route("/api/telegram/getUpdates", methods=["GET", "OPTIONS"])
+def proxy_get_updates():
+    if request.method == "OPTIONS":
+        return "", 200
+    offset = request.args.get("offset")
+    timeout = request.args.get("timeout", "5")
+    custom_token = request.args.get("bot_token")
+    url = f"https://api.telegram.org/bot{custom_token or BOT_TOKEN}/getUpdates"
+    params = {"timeout": timeout}
+    if offset:
+        params["offset"] = offset
+    try:
+        res = requests.get(url, params=params, timeout=int(timeout) + 5)
+        return jsonify(res.json()), res.status_code
+    except Exception as e:
+        return jsonify({"ok": False, "description": str(e)}), 500
+
+@app.route("/api/telegram/getMe", methods=["GET", "OPTIONS"])
+def proxy_get_me():
+    if request.method == "OPTIONS":
+        return "", 200
+    custom_token = request.args.get("bot_token")
+    url = f"https://api.telegram.org/bot{custom_token or BOT_TOKEN}/getMe"
+    try:
+        res = requests.get(url, timeout=10)
+        return jsonify(res.json()), res.status_code
+    except Exception as e:
+        return jsonify({"ok": False, "description": str(e)}), 500
 
 # ==============================================================
 # የቴሌግራም ቦት አዳማጭ ሉፕ (Telegram Bot Polling Loop)
@@ -173,7 +283,7 @@ def handle_update(update):
         info_text = (
             "ℹ️ <b>አጸደ ትጉሃን የዕቅድና ሪፖርት አስተዳደር ስርዓት</b>\n\n"
             "ይህ ቦት ከመተግበሪያው ጋር በቀጥታ የተገናኘ ሲሆን፣ ክፍሎች ሪፖርት ሲያስገቡና እቅድ ሲያስተላልፉ በቅጽበት ማሳወቂያዎችን ያደርሳል።\n\n"
-            f"📍 ግሩፕ ID: <code>{CHAT_ID}</code>\n"
+            f"📍 ግሩፕ/ተጠቃሚ ID: <code>{CHAT_ID}</code>\n"
             "🟢 ሁኔታ፦ መስመር ላይ (Online 24/7)"
         )
         send_telegram_reply(chat_id, info_text, msg_id)
