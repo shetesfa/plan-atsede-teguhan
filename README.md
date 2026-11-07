@@ -1,17 +1,53 @@
-# atsede_teguhan_app
+# ዓጸደ ተጉሃን የሰንበት ት/ቤት የዕቅድ እና ሪፖርት መተግበሪያ
+### Atsede Teguhan Sunday School Planning & Report System
 
-A new Flutter project.
+ይህ ፕሮጀክት የዓጸደ ተጉሃን ሰንበት ት/ቤት የ2019 ዓ.ም ዓመታዊ ዕቅዶችን፣ የክፍላት ተግባራትን፣ ሪፖርቶችን፣ ይፋዊ ደብዳቤዎችን እና ፕሮፖዛሎችን በዘመናዊ መልኩ ለማስተዳደር የተዘጋጀ የተሟላ የሞባይልና የዳመና (Cloud) ሥርዓት ነው።
 
-## Getting Started
+---
 
-This project is a starting point for a Flutter application.
+## 📁 የተካተቱ የውሂብ ሰነዶች እና ዳታዎች (Data & Assets)
 
-A few resources to get you started if this is your first Flutter project:
+* **የዕቅድ ሰነዶች (Official Plans):**
+  * `2019 ዓ.ም እቅድ (2).xlsx` - ዋናው የ2019 ዓ.ም የክፍላት ዕቅድ ሰነድ
+  * `እቅድ መዝሙር ክፍል 2019 አዲስ.pdf` - የተጠናቀረ የመዝሙር ክፍል ዕቅድ
+  * `assets/plan_2019.xlsx` & `assets/default_plans.json` - በመተግበሪያው ውስጥ በቀጥታ የተቀናጁ የዕቅድ ዝርዝሮች
+* **የተተነተኑ ዳታዎች (Extracted & Structured Data):**
+  * `full_extracted_data.json` - ከሰነዶች የወጡ የተሟሉ የክፍላት ተግባራት በዝርዝር
+  * `dept_counts.json` - በእያንዳንዱ ክፍል የተያዙ የዕቅዶች ብዛት
+  * `dept_dates_summary.json` - የእቅዶች የጊዜ ሰሌዳና የቀናት ማጠቃለያ
+* **የዳታቤዝ እና የኤፒአይ ፋይሎች (Database & API):**
+  * `database/atsede_db.sql` - የተሟላ የ MySQL ዳታቤዝ አወቃቀር
+  * `api/db.php` & `api/plans.php` - የዌብ ኤፒአይ ግንኙነት ፋይሎች
+* **የቴሌግራም ቦት እና የደመና አገልጋይ (Telegram Bot & Cloud Server):**
+  * `backend/bot_server.py` - የቴሌግራም ማሳወቂያ እና ሪፖርት መቀበያ ቦት (@atsedetestsystembot)
+  * `backend/render.yaml` & `backend/Procfile` - በ Render ደመና ላይ ለማስተናገድ የተዘጋጁ የማዋቀሪያ ፋይሎች
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+---
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## 🚀 ዋና ዋና ገጽታዎች (Features)
+
+1. **ዘመናዊ ዳሽቦርድ (Executive Dashboard):**
+   * የክፍላትን አፈፃፀም፣ አጠቃላይ የዕቅድ ብዛት እና መሪ ሰሌዳ (Leaderboard) ያሳያል።
+2. **የዕቅድ ካላንደር እና ዝርዝር (Calendar & Task Tracking):**
+   * ተግባራትን በቀን፣ በክፍል እና በሁኔታ (የተጠናቀቀ፣ በሂደት ላይ ያለ፣ ያልተጀመረ) የመከታተል አቅም።
+3. **ደብዳቤና ፕሮፖዛል ማመንጫ (Official Letter & Proposal Generator):**
+   * በኢትዮጵያ ዘመን አቆጣጠር ይፋዊ ደብዳቤዎችን እና ፕሮፖዛሎችን በፒዲኤፍ የማመንጨት እና የማጋራት ችሎታ።
+4. **የቴሌግራም ቦት ውህደት (Telegram Bot Integration):**
+   * አዳዲስ ተግባራት ሲከናወኑ እና ሪፖርቶች ሲቀርቡ ለተጠቃሚዎች እና ለአመራሩ ወዲያውኑ ማሳወቂያ ይልካል።
+
+---
+
+## 🛠️ አጠቃቀም እና ማስኬጃ (Running the Project)
+
+### የፍላተር መተግበሪያ (Flutter App):
+```bash
+flutter pub get
+flutter run
+```
+
+### የባክኤንድ ሰርቨር (Backend / Bot):
+```bash
+cd backend
+pip install -r requirements.txt
+python bot_server.py
+```
