@@ -47,6 +47,9 @@ if ($method === 'GET') {
 
     // አስተዳዳሪ ካልሆነ የራሱን ክፍል እቅዶች ብቻ ነው ማየት የሚችለው
     if (!$auth['is_super_admin']) {
+        if (!empty($requestedDept) && $requestedDept !== 'all' && $requestedDept !== $auth['department_id']) {
+            jsonError('የተከለከለ ክንውን! የሌላ ክፍልን እቅዶች የመጠየቅ ፈቃድ የለዎትም (Forbidden).', 403);
+        }
         $sql .= " AND p.department_id = ?";
         $params[] = $auth['department_id'];
     } elseif ($requestedDept && $requestedDept !== 'all' && $requestedDept !== 'admin') {
@@ -179,9 +182,9 @@ if ($method === 'POST') {
     $budget = $input['budget'] ?? null;
     $remarks = $input['remarks'] ?? null;
     $monthsJson = isset($input['months']) ? json_encode($input['months'], JSON_UNESCAPED_UNICODE) : ($input['months_json'] ?? null);
-    $progress = (int)($input['progress_percent'] ?? 0);
+    $progress = max(0, min(100, (int)($input['progress_percent'] ?? 0)));
     $status = $input['status'] ?? ($progress >= 100 ? 'completed' : 'in_progress');
-    $priority = $input['priority'] ?? 'medium';
+    $priority = in_array($input['priority'] ?? '', ['high', 'medium', 'low'], true) ? $input['priority'] : 'medium';
     $assignedTo = $input['assigned_to'] ?? null;
     $syncId = $input['sync_id'] ?? ('sync_' . uniqid());
 
@@ -190,13 +193,19 @@ if ($method === 'POST') {
     }
 
     // ያለውን እቅድ ማረጋገጥ
-    $checkStmt = $pdo->prepare("SELECT department_id FROM plans WHERE id = ?");
+    $checkStmt = $pdo->prepare("SELECT department_id, version FROM plans WHERE id = ?");
     $checkStmt->execute([$id]);
     $existing = $checkStmt->fetch();
 
     if ($existing) {
         // የሌላ ክፍልን እቅድ እንዳያሻሽል ማረጋገጥ
         requireDepartmentOrAdmin($auth, $existing['department_id']);
+
+        // Optimistic Concurrency ፍተሻ
+        $clientVersion = isset($input['version']) ? (int)$input['version'] : null;
+        if ($clientVersion !== null && (int)$existing['version'] > $clientVersion) {
+            jsonError('የስሪት ግጭት ተፈጥሯል (Version Conflict)! እቅዱ በሌላ ተጠቃሚ ቀድሞ ስለተሻሻለ እባክዎ ገጹን አድሰው እንደገና ይሞክሩ።', 409);
+        }
 
         $updateStmt = $pdo->prepare("
             UPDATE plans SET
@@ -251,7 +260,7 @@ if ($method === 'PUT') {
     }
 
     $id = $input['id'];
-    $checkStmt = $pdo->prepare("SELECT department_id FROM plans WHERE id = ?");
+    $checkStmt = $pdo->prepare("SELECT department_id, version FROM plans WHERE id = ?");
     $checkStmt->execute([$id]);
     $existing = $checkStmt->fetch();
 
@@ -261,7 +270,12 @@ if ($method === 'PUT') {
 
     requireDepartmentOrAdmin($auth, $existing['department_id']);
 
-    $progress = isset($input['progress_percent']) ? (int)$input['progress_percent'] : null;
+    $clientVersion = isset($input['version']) ? (int)$input['version'] : null;
+    if ($clientVersion !== null && (int)$existing['version'] > $clientVersion) {
+        jsonError('የስሪት ግጭት ተፈጥሯል (Version Conflict)! እቅዱ በሌላ ተጠቃሚ ቀድሞ ስለተሻሻለ እባክዎ ገጹን አድሰው እንደገና ይሞክሩ።', 409);
+    }
+
+    $progress = isset($input['progress_percent']) ? max(0, min(100, (int)$input['progress_percent'])) : null;
     $status = $input['status'] ?? null;
 
     if ($progress !== null) {

@@ -161,7 +161,7 @@ function verifyToken(?string $token, ?PDO $pdo = null): ?array {
         return null; // ጊዜው ያለፈበት ቶከን
     }
 
-    // የተሰረዘ (Revoked / Logged out) መሆኑን መፈተሽ
+    // የተሰረዘ (Revoked / Logged out) መሆኑን መፈተሽ (Fail-Closed)
     if ($pdo !== null) {
         $tokenHash = hash('sha256', $token);
         try {
@@ -170,7 +170,41 @@ function verifyToken(?string $token, ?PDO $pdo = null): ?array {
             if ($stmt->fetch()) {
                 return null; // ተጠቃሚው ከዚህ ቶከን ወጥቷል (Revoked)
             }
-        } catch (\Exception $e) {}
+        } catch (\Exception $e) {
+            // የዳታቤዝ ችግር ካለ ለደህንነት ሲባል ቶከኑን ውድቅ ማድረግ (Fail-Closed)
+            return null;
+        }
+
+        // ተጠቃሚው አሁንም በዳታቤዝ ውስጥ ንቁ (active) መሆኑን ማረጋገጥ
+        $userId = $payload['user_id'] ?? null;
+        if ($userId) {
+            try {
+                $uStmt = $pdo->prepare("
+                    SELECT u.id, u.username, u.department_id, u.full_name, u.role_title, u.status,
+                           d.is_super_admin, d.name AS department_name
+                    FROM users u
+                    LEFT JOIN departments d ON u.department_id = d.id
+                    WHERE u.id = ? LIMIT 1
+                ");
+                $uStmt->execute([$userId]);
+                $liveUser = $uStmt->fetch();
+
+                if (!$liveUser || ($liveUser['status'] ?? '') !== 'active') {
+                    // ተጠቃሚው ታግዷል፣ ተሰርዟል ወይም ንቁ አይደለም
+                    return null;
+                }
+
+                // የቅርብ ጊዜውን ፈቃድና ክፍል ከአገልጋዩ ዳታቤዝ ማዘመን (በአሮጌ ቶከን ብቻ አለመተማመን)
+                $payload['username'] = $liveUser['username'];
+                $payload['department_id'] = $liveUser['department_id'];
+                $payload['department_name'] = $liveUser['department_name'];
+                $payload['full_name'] = $liveUser['full_name'];
+                $payload['role_title'] = $liveUser['role_title'];
+                $payload['is_super_admin'] = (bool)($liveUser['is_super_admin'] ?? false);
+            } catch (\Exception $e) {
+                return null; // Fail-Closed
+            }
+        }
     }
 
     return $payload;
@@ -225,6 +259,43 @@ function requireSuperAdmin(array $auth): void {
 function requireDepartmentOrAdmin(array $auth, string $targetDeptId): void {
     if (empty($auth['is_super_admin']) && $auth['department_id'] !== $targetDeptId) {
         jsonError('የሌላ ክፍልን መረጃ የማየት ወይም የማሻሻል ፈቃድ የለዎትም (Forbidden).', 403);
+    }
+}
+
+function requireResourceOwnership(array $auth, string $resourceDeptId, string $resourceType = 'resource'): void {
+    if (empty($auth['is_super_admin']) && $auth['department_id'] !== $resourceDeptId) {
+        jsonError("የተከለከለ ክንውን! ይህ $resourceType የሚመለከተው ሌላ ክፍልን ነው (Forbidden).", 403);
+    }
+}
+
+function requireChatRoomMembership(array $auth, string $roomOrChannel): void {
+    $room = trim($roomOrChannel);
+    // 1. ይፋዊ ቻናሎች ለሁሉም ክፍሎች ክፍት ናቸው
+    $publicChannels = ['ይፋዊ መመሪያዎች', 'general', 'ጠቅላላ ውይይት', 'public', 'all'];
+    if (in_array($room, $publicChannels, true)) {
+        return;
+    }
+
+    // 2. የፅ/ቤት የግል ቻናል ለፅ/ቤት ብቻ
+    if ($room === 'office' || $room === 'ፅ/ቤት' || $room === 'room_office') {
+        if (empty($auth['is_super_admin'])) {
+            jsonError('የተከለከለ ክንውን! የፅ/ቤት የውስጥ ውይይትን ማግኘት የሚችሉት የፅ/ቤት አባላት ብቻ ናቸው (Forbidden).', 403);
+        }
+        return;
+    }
+
+    // 3. የክፍል ውስጣዊ ቻናሎች (ለምሳሌ dept_education, dept_mezmur)
+    if (str_starts_with($room, 'dept_')) {
+        $targetDept = substr($room, 5);
+        if (empty($auth['is_super_admin']) && $auth['department_id'] !== $targetDept) {
+            jsonError("የተከለከለ ክንውን! የዚህ ክፍል ($targetDept) አባል ባለመሆንዎ ውይይቱን ማግኘት አይችሉም (Forbidden).", 403);
+        }
+        return;
+    }
+
+    // ነባሪ ጥበቃ - ስሙ የክፍሉን ስም ካልያዘ እና ፅ/ቤት ካልሆነ መከልከል
+    if (empty($auth['is_super_admin']) && !str_contains($room, $auth['department_id'])) {
+        jsonError('የተከለከለ ክንውን! ወደዚህ የውይይት ክፍል የመግባት ፈቃድ የለዎትም (Forbidden).', 403);
     }
 }
 

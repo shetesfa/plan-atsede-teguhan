@@ -72,6 +72,10 @@ if ($method === 'GET') {
 
     // አስተዳዳሪ ካልሆነ የራሱን ክፍል ሪፖርቶች ብቻ ያያል
     if (!$auth['is_super_admin']) {
+        $filterDept = $_GET['dept'] ?? null;
+        if (!empty($filterDept) && $filterDept !== 'all' && $filterDept !== $auth['department_id']) {
+            jsonError('የተከለከለ ክንውን! የሌላ ክፍልን ሪፖርቶች የመጠየቅ ፈቃድ የለዎትም (Forbidden).', 403);
+        }
         $sql .= " AND r.department_id = ?";
         $params[] = $auth['department_id'];
     } else {
@@ -115,8 +119,26 @@ if ($method === 'POST' && $action !== 'review') {
     $planId = !empty($input['plan_id']) ? $input['plan_id'] : null;
 
     // ማንነት እና ክፍል ከ Token ብቻ ይወሰዳሉ (Spoofing መከላከል)
+    if (!empty($input['department_id']) && !$auth['is_super_admin'] && $input['department_id'] !== $auth['department_id']) {
+        jsonError('የተከለከለ ክንውን! በሌላ ክፍል ስም ሪፖርት ማቅረብ አይችሉም (Forbidden).', 403);
+    }
     $deptId = $auth['is_super_admin'] ? ($input['department_id'] ?? $auth['department_id']) : $auth['department_id'];
     $submittedBy = $auth['full_name'] ?? $auth['username'];
+
+    // ነባር ሪፖርት መኖሩን እና ሁኔታውን ማረጋገጥ
+    $checkStmt = $pdo->prepare("SELECT department_id, status FROM reports WHERE id = ?");
+    $checkStmt->execute([$reportId]);
+    $existingReport = $checkStmt->fetch();
+
+    if ($existingReport) {
+        // የሌላ ክፍልን ሪፖርት እንዳይተካ ማረጋገጥ
+        requireDepartmentOrAdmin($auth, $existingReport['department_id']);
+
+        // የጸደቀ ሪፖርት እንዳይቀየር መከልከል
+        if ($existingReport['status'] === 'approved' && !$auth['is_super_admin']) {
+            jsonError('የተከለከለ ክንውን! በፅ/ቤት የጸደቀ ሪፖርት ላይ ቀጥታ ማሻሻያ ማድረግ አይቻልም (Forbidden).', 403);
+        }
+    }
 
     $title = trim($input['title'] ?? '');
     $activities = trim($input['activities_completed'] ?? ($input['summary'] ?? ($input['description'] ?? '')));
@@ -308,6 +330,10 @@ if ($method === 'POST' && $action === 'review') {
     $validActions = ['approved', 'revision_requested', 'rejected', 'under_review'];
     if (!in_array($reviewAction, $validActions, true)) {
         jsonError('ትክክለኛ ያልሆነ የግምገማ ውሳኔ', 400);
+    }
+
+    if ($reviewAction === 'revision_requested' && empty($comment)) {
+        jsonError('ለማሻሻያ ጥያቄ የማብራሪያ አስተያየት (comment) መስጠት ግዴታ ነው', 400);
     }
 
     $pdo->beginTransaction();

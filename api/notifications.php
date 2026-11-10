@@ -63,6 +63,19 @@ if ($method === 'POST') {
     }
 
     if ($id) {
+        $checkStmt = $pdo->prepare("SELECT department_id FROM notifications WHERE id = ?");
+        $checkStmt->execute([$id]);
+        $notif = $checkStmt->fetch();
+
+        if (!$notif) {
+            jsonError('ማሳወቂያው አልተገኘም', 404);
+        }
+
+        // የማሳወቂያው ባለቤት ወይም ፅ/ቤት ወይም ይፋዊ (all) ካልሆነ መከልከል (IDOR Protection)
+        if (!$auth['is_super_admin'] && $notif['department_id'] !== $auth['department_id'] && $notif['department_id'] !== 'all' && $notif['department_id'] !== null) {
+            jsonError('የተከለከለ ክንውን! የሌላ ክፍልን ማሳወቂያ የመቀየር ፈቃድ የለዎትም (Forbidden).', 403);
+        }
+
         $stmt = $pdo->prepare("UPDATE notifications SET is_read = 1 WHERE id = ?");
         $stmt->execute([$id]);
         jsonResponse(['message' => 'ማሳወቂያው እንደተነበበ ተደርጓል', 'id' => $id]);

@@ -9,8 +9,14 @@ class ApiService {
   factory ApiService() => _instance;
   ApiService._internal();
 
-  // በነባሪ የአካባቢው PHP ሰርቨር አድራሻ (ወይም በ Render/Cloud ሊቀየር ይችላል)
-  static String baseUrl = 'http://127.0.0.1:8000/api';
+  // በነባሪ በምርት (Production) ወይም በሙከራ (Dev) የሚወሰን፤ በ SharedPreferences ወይም በ dart-define ሊቀየር የሚችል
+  static const String _defaultProdUrl = 'https://plan-atsede-teguhan.onrender.com/api';
+  static const String _defaultDevUrl = 'http://127.0.0.1:8000/api';
+
+  static String baseUrl = const String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: kReleaseMode ? _defaultProdUrl : _defaultDevUrl,
+  );
   static const String _prefApiBaseKey = 'atsede_api_base_url';
   static const String _prefTokenKey = 'atsede_auth_token';
   static const String _prefUserDataKey = 'atsede_user_data';
@@ -322,6 +328,29 @@ class ApiService {
       return {'success': false, 'message': data['message'] ?? 'ማመሳከር አልተቻለም'};
     } catch (e) {
       return {'success': false, 'message': 'የማመሳከር አውታረ-መረብ ስህተት፦ $e'};
+    }
+  }
+
+  // 13. የይለፍ ቃል መቀየር (Change Password)
+  Future<Map<String, dynamic>> changePassword(String oldPassword, String newPassword) async {
+    final url = Uri.parse('$baseUrl/auth.php?action=change_password');
+    try {
+      final res = await http.post(
+        url,
+        headers: _headers,
+        body: jsonEncode({
+          'old_password': oldPassword,
+          'new_password': newPassword,
+        }),
+      ).timeout(const Duration(seconds: 10));
+
+      final data = jsonDecode(res.body);
+      if (res.statusCode == 200 && data['status'] == 'success') {
+        return {'success': true, 'message': data['data']['message'] ?? 'የይለፍ ቃል ተቀይሯል'};
+      }
+      return {'success': false, 'message': data['message'] ?? 'የይለፍ ቃል መቀየር አልተቻለም'};
+    } catch (e) {
+      return {'success': false, 'message': 'የአውታረ-መረብ ስህተት፦ $e'};
     }
   }
 }

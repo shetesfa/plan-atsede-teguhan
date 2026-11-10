@@ -21,12 +21,7 @@ if ($method === 'GET') {
     $limit = isset($_GET['limit']) ? min((int)$_GET['limit'], 200) : 100;
 
     // የክፍል አባልነት ፈቃድ ማረጋገጫ (Room Membership Protection)
-    if (str_contains($channel, 'ፅ/ቤት') || $channel === 'room_office') {
-        // ፅ/ቤት ወይም የሚመለከተው ክፍል ብቻ
-        if (!$auth['is_super_admin'] && !str_contains($channel, $auth['department_name'] ?? $auth['department_id'])) {
-            // የግል ክፍል ከሆነ ፍቃድ መፈተሽ
-        }
-    }
+    requireChatRoomMembership($auth, $channel);
 
     $sql = "
         SELECT m.id, m.room_id, m.channel, m.department_id, m.sender_name, m.sender_role,
@@ -57,8 +52,9 @@ if ($method === 'POST') {
 
     // የተነበበ ምልክት ማድረግ
     if ($action === 'mark_read') {
-        $channel = $input['channel'] ?? '';
+        $channel = trim($input['channel'] ?? ($input['room_id'] ?? ''));
         if (!empty($channel)) {
+            requireChatRoomMembership($auth, $channel);
             $stmt = $pdo->prepare("UPDATE chat_messages SET is_read = 1 WHERE channel = ? OR room_id = ?");
             $stmt->execute([$channel, $channel]);
             jsonResponse(['message' => 'መልእክቶቹ እንደተነበቡ ተደርገዋል']);
@@ -68,6 +64,7 @@ if ($method === 'POST') {
 
     $msgId = !empty($input['id']) ? $input['id'] : ('msg_' . time() . '_' . rand(100, 999));
     $channel = trim($input['channel'] ?? ($input['room_id'] ?? 'ይፋዊ መመሪያዎች'));
+    requireChatRoomMembership($auth, $channel);
 
     // ማንነት እና ክፍል ከ Token ብቻ ይወሰዳሉ (Spoofing መከላከል!)
     $deptId = $auth['department_id'];

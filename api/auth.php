@@ -124,8 +124,8 @@ if ($action === 'change_password' && $method === 'POST') {
     $oldPass = (string)($input['old_password'] ?? '');
     $newPass = (string)($input['new_password'] ?? '');
 
-    if (strlen($newPass) < 8) {
-        jsonError('አዲሱ የይለፍ ቃል ቢያንስ 8 ፊደላት ወይም ቁጥሮች መሆን አለበት።', 400);
+    if (strlen($newPass) < 8 || !preg_match('/[0-9]/', $newPass)) {
+        jsonError('አዲሱ የይለፍ ቃል ቢያንስ 8 ፊደላት እና ቢያንስ አንድ ቁጥር መያዝ አለበት።', 400);
     }
 
     $stmt = $pdo->prepare("SELECT password_hash FROM users WHERE id = ?");
