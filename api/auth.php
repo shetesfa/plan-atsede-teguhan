@@ -1,6 +1,6 @@
 <?php
 // ============================================================
-// የአጸደ ትጉሃን የተጠቃሚዎች ማረጋገጫ ኤፒአይ (Authentication API)
+// የአጸደ ትጉሃን የተጠቃሚዎች ማረጋገጫ ኤፒአይ (Hardened Authentication API)
 // ============================================================
 
 require_once __DIR__ . '/config.php';
@@ -8,97 +8,64 @@ require_once __DIR__ . '/config.php';
 $action = $_GET['action'] ?? 'login';
 $method = $_SERVER['REQUEST_METHOD'];
 
-// 1. መግቢያ (Login)
+// 1. መግቢያ (Secure Login with Rate Limiting)
 if ($action === 'login' && $method === 'POST') {
     $input = getJsonInput();
     $loginIdentifier = trim($input['username'] ?? $input['department_id'] ?? '');
-    $password = trim($input['password'] ?? '');
+    $password = (string)($input['password'] ?? '');
 
-    if (empty($loginIdentifier)) {
-        jsonError('እባክዎ የተጠቃሚ ስም ወይም ክፍል ያስገቡ።', 400);
+    if (empty($loginIdentifier) || empty($password)) {
+        jsonError('እባክዎ የተጠቃሚ ስም እና የይለፍ ቃል ያስገቡ።', 400);
     }
 
-    // ተጠቃሚውን መፈለግ (በ username፣ በ id፣ ወይም በ department_id)
+    $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+    $rateLimitKey = "login_" . hash('sha256', $ip . '_' . strtolower($loginIdentifier));
+
+    // Rate Limiting ፍተሻ (ከ 5 ሙከራ በላይ ከሆነ ለ 15 ደቂቃ ይቆልፋል)
+    checkRateLimit($pdo, $rateLimitKey, 5, 15);
+
+    // ተጠቃሚውን ከዳታቤዝ ብቻ መፈለግ (Auto-creation ሙሉ በሙሉ ተወግዷል!)
     $stmt = $pdo->prepare("
-        SELECT u.*, d.name AS department_name, d.short_name AS department_short_name, d.is_super_admin
+        SELECT u.id, u.username, u.full_name, u.role_title, u.password_hash, u.status, u.phone, u.email,
+               d.id AS department_id, d.name AS department_name, d.short_name AS department_short_name, d.is_super_admin
         FROM users u
         JOIN departments d ON u.department_id = d.id
-        WHERE (u.username = ? OR u.department_id = ?) AND u.status = 'active'
+        WHERE (u.username = ? OR u.department_id = ?)
         LIMIT 1
     ");
     $stmt->execute([$loginIdentifier, $loginIdentifier]);
     $user = $stmt->fetch();
 
-    // ተጠቃሚው ካልተገኘ ነገር ግን ክፍሉ በ departments ውስጥ ካለ አዲስ ተጠቃሚ በራስ ሰር እንፈጥራለን
-    if (!$user) {
-        $deptStmt = $pdo->prepare("SELECT * FROM departments WHERE id = ? LIMIT 1");
-        $deptStmt->execute([$loginIdentifier]);
-        $dept = $deptStmt->fetch();
-
-        if ($dept) {
-            $defaultHash = password_hash('1234', PASSWORD_BCRYPT);
-            $createStmt = $pdo->prepare("
-                INSERT INTO users (department_id, username, full_name, role_title, password_hash, status)
-                VALUES (?, ?, ?, ?, ?, 'active')
-            ");
-            $fullName = $dept['name'] . ' ተወካይ';
-            $roleTitle = $dept['is_super_admin'] ? 'የፅ/ቤት ዋና ጸሐፊ' : 'የክፍል ኃላፊ';
-            $createStmt->execute([$dept['id'], $dept['id'], $fullName, $roleTitle, $defaultHash]);
-            $newUserId = (int)$pdo->lastInsertId();
-
-            $user = [
-                'id' => $newUserId,
-                'department_id' => $dept['id'],
-                'username' => $dept['id'],
-                'full_name' => $fullName,
-                'role_title' => $roleTitle,
-                'password_hash' => $defaultHash,
-                'phone' => null,
-                'email' => null,
-                'department_name' => $dept['name'],
-                'department_short_name' => $dept['short_name'],
-                'is_super_admin' => (int)$dept['is_super_admin']
-            ];
-        }
+    if (!$user || $user['status'] !== 'active') {
+        recordFailedLoginAttempt($pdo, $rateLimitKey);
+        jsonError('የተሳሳተ የተጠቃሚ ስም ወይም የይለፍ ቃል!', 401);
     }
 
-    if (!$user) {
-        jsonError('የተሳሳተ የተጠቃሚ ስም ወይም ክፍል!', 401);
+    // የይለፍ ቃል በ Bcrypt ብቻ ማረጋገጥ (ምንም ደካማ ነባሪ የለም!)
+    if (!password_verify($password, $user['password_hash'])) {
+        recordFailedLoginAttempt($pdo, $rateLimitKey);
+        jsonError('የተሳሳተ የተጠቃሚ ስም ወይም የይለፍ ቃል!', 401);
     }
 
-    // የይለፍ ቃል ማረጋገጫ (ደህንነቱ የተጠበቀ bcrypt + ነባር የይለፍ ቃላትን ወደ bcrypt በራስ-ሰር ማሳደግ)
-    $passwordValid = false;
-    if (password_verify($password, $user['password_hash'])) {
-        $passwordValid = true;
-    } elseif ($password === '1234' || $password === 'admin' || $password === '123456' || $password === $user['department_id'] || $password === 'atsede') {
-        // የነበረውን ቀላል የይለፍ ቃል ወደ አዲሱ ጠንካራ bcrypt hash ማዘመን
-        $newHash = password_hash($password, PASSWORD_BCRYPT);
-        $updateHashStmt = $pdo->prepare("UPDATE users SET password_hash = ? WHERE id = ?");
-        $updateHashStmt->execute([$newHash, $user['id']]);
-        $passwordValid = true;
-    }
+    // ስኬታማ መግቢያ — Rate Limit ሪከርድ ማጽዳት
+    clearRateLimit($pdo, $rateLimitKey);
 
-    if (!$passwordValid) {
-        jsonError('የተሳሳተ የይለፍ ቃል! እባክዎ ደግመው ይሞክሩ።', 401);
-    }
-
-    // የመጨረሻ መግቢያ ሰዓት ማዘመን
     $now = date('Y-m-d H:i:s');
     $pdo->prepare("UPDATE users SET last_login = ? WHERE id = ?")->execute([$now, $user['id']]);
 
-    // HMAC Token ማመንጨት
+    // HMAC Token በሰርቨር ላይ ብቻ በተመሰረቱ ትክክለኛ መረጃዎች ማመንጨት
     $tokenPayload = [
-        'user_id' => $user['id'],
+        'user_id' => (int)$user['id'],
         'department_id' => $user['department_id'],
         'username' => $user['username'],
-        'is_super_admin' => (bool)$user['is_super_admin']
+        'is_super_admin' => (bool)$user['is_super_admin'],
+        'role_title' => $user['role_title']
     ];
-    $token = createToken($tokenPayload);
+    $token = createToken($tokenPayload, 86400 * 7); // ለ 7 ቀናት የሚሰራ
 
-    // ኦዲት መመዝገብ
     logAudit($pdo, 'user_login', 'users', (string)$user['id'], (int)$user['id'], $user['department_id'], [
         'username' => $user['username'],
-        'department' => $user['department_name']
+        'ip' => $ip
     ]);
 
     jsonResponse([
@@ -108,8 +75,6 @@ if ($action === 'login' && $method === 'POST') {
             'username' => $user['username'],
             'full_name' => $user['full_name'],
             'role_title' => $user['role_title'],
-            'phone' => $user['phone'],
-            'email' => $user['email'],
             'department_id' => $user['department_id'],
             'department_name' => $user['department_name'],
             'department_short_name' => $user['department_short_name'],
@@ -118,12 +83,21 @@ if ($action === 'login' && $method === 'POST') {
     ]);
 }
 
-// 2. የአሁኑን ተጠቃሚ መረጃ ማረጋገጫ (Current User Profile)
-if ($action === 'me' && $method === 'GET') {
-    $auth = authenticateRequest();
-    if (!$auth) {
-        jsonError('ያልተፈቀደ መዳረሻ! እባክዎ መጀመሪያ ይግቡ።', 401);
+// 2. መውጫ (Secure Logout — Revoke Token)
+if ($action === 'logout' && $method === 'POST') {
+    $auth = requireAuth();
+    $headers = getallheaders();
+    $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? '';
+    if (preg_match('/Bearer\s+(.*)$/i', $authHeader, $matches)) {
+        revokeToken($pdo, trim($matches[1]), $auth['user_id']);
     }
+    logAudit($pdo, 'user_logout', 'users', (string)$auth['user_id'], $auth['user_id'], $auth['department_id']);
+    jsonResponse(['message' => 'በተሳካ ሁኔታ ከስርዓቱ ወጥተዋል']);
+}
+
+// 3. የአሁኑን ተጠቃሚ መረጃ ማረጋገጫ (Profile)
+if ($action === 'me' && $method === 'GET') {
+    $auth = requireAuth();
 
     $stmt = $pdo->prepare("
         SELECT u.id, u.username, u.full_name, u.role_title, u.phone, u.email, u.last_login,
@@ -143,35 +117,31 @@ if ($action === 'me' && $method === 'GET') {
     jsonResponse(['user' => $user]);
 }
 
-// 3. የይለፍ ቃል መቀየሪያ (Change Password)
+// 4. የይለፍ ቃል መቀየሪያ (Change Password)
 if ($action === 'change_password' && $method === 'POST') {
-    $auth = authenticateRequest();
-    if (!$auth) {
-        jsonError('ያልተፈቀደ መዳረሻ!', 401);
-    }
-
+    $auth = requireAuth();
     $input = getJsonInput();
-    $oldPass = trim($input['old_password'] ?? '');
-    $newPass = trim($input['new_password'] ?? '');
+    $oldPass = (string)($input['old_password'] ?? '');
+    $newPass = (string)($input['new_password'] ?? '');
 
-    if (strlen($newPass) < 4) {
-        jsonError('አዲሱ የይለፍ ቃል ቢያንስ 4 ፊደላት ወይም ቁጥሮች መሆን አለበት።', 400);
+    if (strlen($newPass) < 8) {
+        jsonError('አዲሱ የይለፍ ቃል ቢያንስ 8 ፊደላት ወይም ቁጥሮች መሆን አለበት።', 400);
     }
 
     $stmt = $pdo->prepare("SELECT password_hash FROM users WHERE id = ?");
     $stmt->execute([$auth['user_id']]);
     $currentHash = $stmt->fetchColumn();
 
-    if (!password_verify($oldPass, $currentHash) && $oldPass !== '1234') {
+    if (!$currentHash || !password_verify($oldPass, $currentHash)) {
         jsonError('የድሮው የይለፍ ቃል የተሳሳተ ነው!', 400);
     }
 
-    $newHash = password_hash($newPass, PASSWORD_BCRYPT);
+    $newHash = password_hash($newPass, PASSWORD_BCRYPT, ['cost' => 12]);
     $pdo->prepare("UPDATE users SET password_hash = ? WHERE id = ?")->execute([$newHash, $auth['user_id']]);
 
-    logAudit($pdo, 'password_change', 'users', (string)$auth['user_id'], (int)$auth['user_id'], $auth['department_id']);
+    logAudit($pdo, 'password_change', 'users', (string)$auth['user_id'], $auth['user_id'], $auth['department_id']);
 
     jsonResponse(['message' => 'የይለፍ ቃልዎ በተሳካ ሁኔታ ተቀይሯል!']);
 }
 
-jsonError('ያልታወቀ ጥያቄ ወይም ዘዴ (Invalid action)', 404);
+jsonError('ያልታወቀ ጥያቄ ወይም ዘዴ', 404);

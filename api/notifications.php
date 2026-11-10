@@ -1,24 +1,24 @@
 <?php
 // ============================================================
-// የአጸደ ትጉሃን ማሳወቂያዎች ኤፒአይ (Notifications API)
+// የአጸደ ትጉሃን ማሳወቂያዎች ኤፒአይ (Hardened Notifications API)
 // ============================================================
 
 require_once __DIR__ . '/config.php';
 
+$auth = requireAuth();
 $method = $_SERVER['REQUEST_METHOD'];
-$action = $_GET['action'] ?? '';
 
 // 1. ማሳወቂያዎችን ማምጣት
 if ($method === 'GET') {
-    $dept = $_GET['dept'] ?? null;
     $unreadOnly = isset($_GET['unread_only']) && $_GET['unread_only'] === '1';
 
-    $sql = "SELECT * FROM notifications WHERE 1=1";
-    $params = [];
+    $sql = "SELECT * FROM notifications WHERE (department_id = ? OR department_id = 'all' OR department_id IS NULL)";
+    $params = [$auth['department_id']];
 
-    if ($dept && $dept !== 'all') {
-        $sql .= " AND (department_id = ? OR department_id = 'all' OR department_id IS NULL)";
-        $params[] = $dept;
+    // ፅ/ቤት ከሆነ ሁሉንም ማየት ይችላል
+    if ($auth['is_super_admin']) {
+        $sql = "SELECT * FROM notifications WHERE 1=1";
+        $params = [];
     }
 
     if ($unreadOnly) {
@@ -30,12 +30,11 @@ if ($method === 'GET') {
     $stmt->execute($params);
     $notifications = $stmt->fetchAll();
 
-    // ያልተነበቡ ብዛት
     $countSql = "SELECT COUNT(*) FROM notifications WHERE is_read = 0";
     $countParams = [];
-    if ($dept && $dept !== 'all') {
+    if (!$auth['is_super_admin']) {
         $countSql .= " AND (department_id = ? OR department_id = 'all' OR department_id IS NULL)";
-        $countParams[] = $dept;
+        $countParams[] = $auth['department_id'];
     }
     $cStmt = $pdo->prepare($countSql);
     $cStmt->execute($countParams);
@@ -47,17 +46,16 @@ if ($method === 'GET') {
     ]);
 }
 
-// 2. የተነበበ ምልክት ማድረግ (Mark as Read)
+// 2. የተነበበ ምልክት ማድረግ ወይም ይፋዊ ማስታወቂያ መላክ
 if ($method === 'POST') {
     $input = getJsonInput();
     $id = $input['id'] ?? null;
     $markAll = isset($input['mark_all']) && $input['mark_all'] === true;
-    $dept = $input['department_id'] ?? null;
 
     if ($markAll) {
-        if ($dept) {
+        if (!$auth['is_super_admin']) {
             $stmt = $pdo->prepare("UPDATE notifications SET is_read = 1 WHERE department_id = ? OR department_id = 'all'");
-            $stmt->execute([$dept]);
+            $stmt->execute([$auth['department_id']]);
         } else {
             $pdo->query("UPDATE notifications SET is_read = 1");
         }
@@ -70,13 +68,14 @@ if ($method === 'POST') {
         jsonResponse(['message' => 'ማሳወቂያው እንደተነበበ ተደርጓል', 'id' => $id]);
     }
 
-    // አዲስ ማሳወቂያ በእጅ መፍጠር (ለምሳሌ ይፋዊ ማስታወቂያ)
+    // አዲስ ይፋዊ ማስታወቂያ መላክ (ፅ/ቤት ብቻ!)
     if (!empty($input['title']) && !empty($input['message'])) {
+        requireSuperAdmin($auth);
         $notifId = 'notif_' . uniqid();
         $targetDept = $input['department_id'] ?? 'all';
         $type = $input['type'] ?? 'announcement';
         $stmt = $pdo->prepare("INSERT INTO notifications (id, department_id, title, message, type) VALUES (?, ?, ?, ?, ?)");
-        $stmt->execute([$notifId, $targetDept, $input['title'], $input['message'], $type]);
+        $stmt->execute([$notifId, $targetDept, htmlspecialchars($input['title'], ENT_QUOTES, 'UTF-8'), htmlspecialchars($input['message'], ENT_QUOTES, 'UTF-8'), $type]);
         jsonResponse(['message' => 'ማሳወቂያው ተልኳል', 'id' => $notifId]);
     }
 

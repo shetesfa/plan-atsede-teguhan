@@ -177,4 +177,4 @@ CREATE TABLE IF NOT EXISTS `sync_queue` (
 -- 12. የተጋለጡ ቶከኖችን ከ system_settings ማስወገድ
 UPDATE `system_settings`
 SET `setting_value` = ''
-WHERE `setting_key` = 'telegram_bot_token' AND `setting_value` LIKE '8754142388%';
+WHERE `setting_key` = 'telegram_bot_token';

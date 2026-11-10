@@ -1,22 +1,27 @@
 <?php
 // ============================================================
-// የአጸደ ትጉሃን ይፋዊ ሰነዶች ማህደር ኤፒአይ (Documents Archive API)
+// የአጸደ ትጉሃን ይፋዊ ሰነዶች ማህደር ኤፒአይ (Hardened Documents API)
 // ============================================================
 
 require_once __DIR__ . '/config.php';
 
+$auth = requireAuth();
 $method = $_SERVER['REQUEST_METHOD'];
 
 if ($method === 'GET') {
-    $dept = $_GET['dept'] ?? null;
     $type = $_GET['type'] ?? null;
-
     $sql = "SELECT * FROM documents WHERE 1=1";
     $params = [];
 
-    if ($dept && $dept !== 'all' && $dept !== 'admin') {
+    if (!$auth['is_super_admin']) {
         $sql .= " AND department_id = ?";
-        $params[] = $dept;
+        $params[] = $auth['department_id'];
+    } else {
+        $dept = $_GET['dept'] ?? null;
+        if ($dept && $dept !== 'all' && $dept !== 'admin') {
+            $sql .= " AND department_id = ?";
+            $params[] = $dept;
+        }
     }
 
     if ($type) {
@@ -31,12 +36,11 @@ if ($method === 'GET') {
 }
 
 if ($method === 'POST') {
-    $auth = authenticateRequest();
     $input = getJsonInput();
 
-    $id = $input['id'] ?? ('doc_' . time() . '_' . rand(100, 999));
-    $deptId = $input['department_id'] ?? ($auth['department_id'] ?? 'admin');
-    $docType = $input['doc_type'] ?? 'letter';
+    $id = !empty($input['id']) ? $input['id'] : ('doc_' . time() . '_' . rand(100, 999));
+    $deptId = $auth['is_super_admin'] ? ($input['department_id'] ?? $auth['department_id']) : $auth['department_id'];
+    $docType = in_array($input['doc_type'] ?? '', ['letter', 'proposal', 'note', 'table'], true) ? $input['doc_type'] : 'letter';
     $title = trim($input['title'] ?? 'ይፋዊ ሰነድ');
     $recipient = $input['recipient'] ?? null;
     $date = $input['date'] ?? date('d/m/Y');
@@ -56,7 +60,7 @@ if ($method === 'POST') {
     ");
     $stmt->execute([$id, $deptId, $docType, $title, $recipient, $date, $contentJson, $pdfPath]);
 
-    logAudit($pdo, 'save_document', 'documents', $id, $auth['user_id'] ?? null, $deptId, ['title' => $title, 'type' => $docType]);
+    logAudit($pdo, 'save_document', 'documents', $id, $auth['user_id'], $deptId, ['title' => $title, 'type' => $docType]);
 
     jsonResponse(['message' => 'ሰነዱ በተሳካ ሁኔታ በማህደር ተቀምጧል', 'id' => $id]);
 }

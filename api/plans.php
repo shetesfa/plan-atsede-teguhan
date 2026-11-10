@@ -1,17 +1,17 @@
 <?php
 // ============================================================
-// የአጸደ ትጉሃን የእቅዶች አስተዳደር ኤፒአይ (Plans Management API)
-// ሙሉ CRUD፣ ማጣሪያ፣ ፍለጋ እና የጅምላ ማስገቢያ (Bulk Import)
+// የአጸደ ትጉሃን የእቅዶች አስተዳደር ኤፒአይ (Hardened Plans API)
 // ============================================================
 
 require_once __DIR__ . '/config.php';
 
+$auth = requireAuth(); // እያንዳንዱ ጥያቄ የግድ የተረጋገጠ ተጠቃሚ መሆን አለበት!
 $method = $_SERVER['REQUEST_METHOD'];
 $action = $_GET['action'] ?? '';
 
 // 1. እቅዶችን ማምጣት (GET Plans)
 if ($method === 'GET') {
-    $dept = $_GET['dept'] ?? null;
+    $requestedDept = $_GET['dept'] ?? null;
     $status = $_GET['status'] ?? null;
     $search = $_GET['search'] ?? null;
     $month = $_GET['month'] ?? null;
@@ -19,38 +19,46 @@ if ($method === 'GET') {
 
     // የተወሰነ እቅድ በ ID ማምጣት
     if ($id) {
-        $stmt = $pdo->prepare("SELECT p.*, d.name AS department_name, d.short_name AS department_short_name 
-                               FROM plans p 
-                               JOIN departments d ON p.department_id = d.id 
-                               WHERE p.id = ? AND (p.is_deleted = 0 OR p.is_deleted IS NULL) 
-                               LIMIT 1");
+        $stmt = $pdo->prepare("
+            SELECT p.*, d.name AS department_name, d.short_name AS department_short_name 
+            FROM plans p 
+            JOIN departments d ON p.department_id = d.id 
+            WHERE p.id = ? AND (p.is_deleted = 0 OR p.is_deleted IS NULL) 
+            LIMIT 1
+        ");
         $stmt->execute([$id]);
         $plan = $stmt->fetch();
         if (!$plan) {
             jsonError('እቅዱ አልተገኘም', 404);
         }
+
+        // የክፍል ፈቃድ ማረጋገጫ (አስተዳዳሪ ካልሆነ የሌላ ክፍልን የግል እቅድ ማየት አይችልም)
+        requireDepartmentOrAdmin($auth, $plan['department_id']);
         jsonResponse($plan);
     }
 
-    $sql = "SELECT p.*, d.name AS department_name, d.short_name AS department_short_name 
-            FROM plans p 
-            JOIN departments d ON p.department_id = d.id 
-            WHERE (p.is_deleted = 0 OR p.is_deleted IS NULL)";
+    $sql = "
+        SELECT p.*, d.name AS department_name, d.short_name AS department_short_name 
+        FROM plans p 
+        JOIN departments d ON p.department_id = d.id 
+        WHERE (p.is_deleted = 0 OR p.is_deleted IS NULL)
+    ";
     $params = [];
 
-    // በክፍል ማጣራት
-    if ($dept && $dept !== 'all' && $dept !== 'admin') {
+    // አስተዳዳሪ ካልሆነ የራሱን ክፍል እቅዶች ብቻ ነው ማየት የሚችለው
+    if (!$auth['is_super_admin']) {
         $sql .= " AND p.department_id = ?";
-        $params[] = $dept;
+        $params[] = $auth['department_id'];
+    } elseif ($requestedDept && $requestedDept !== 'all' && $requestedDept !== 'admin') {
+        $sql .= " AND p.department_id = ?";
+        $params[] = $requestedDept;
     }
 
-    // በሁኔታ ማጣራት
     if ($status && $status !== 'all') {
         $sql .= " AND p.status = ?";
         $params[] = $status;
     }
 
-    // በፍለጋ ቃል
     if ($search) {
         $sql .= " AND (p.main_task LIKE ? OR p.detail_task LIKE ? OR p.sub_department LIKE ?)";
         $searchTerm = "%$search%";
@@ -64,7 +72,6 @@ if ($method === 'GET') {
     $stmt->execute($params);
     $plans = $stmt->fetchAll();
 
-    // ወር ማጣሪያ ካለ በ PHP JSON በኩል እንፈትሻለን
     if ($month && $month !== 'all') {
         $plans = array_values(array_filter($plans, function($p) use ($month) {
             if (empty($p['months_json'])) return false;
@@ -78,11 +85,15 @@ if ($method === 'GET') {
 
 // 2. እቅድ መፍጠር ወይም ማሻሻል (POST Plan)
 if ($method === 'POST') {
-    $auth = authenticateRequest();
     $input = getJsonInput();
 
-    // የጅምላ ማስገቢያ (Bulk Import from Excel / Initial data)
-    if ($action === 'bulk_sync' && !empty($input['plans'])) {
+    // የጅምላ ማስገቢያ (ለፅ/ቤት አስተዳዳሪ ብቻ የተፈቀደ)
+    if ($action === 'bulk_sync') {
+        requireSuperAdmin($auth);
+        if (empty($input['plans']) || !is_array($input['plans'])) {
+            jsonError('የሚገቡ እቅዶች ዝርዝር አልተገኘም', 400);
+        }
+
         $pdo->beginTransaction();
         try {
             $insertStmt = $pdo->prepare("
@@ -127,11 +138,11 @@ if ($method === 'POST') {
                     $item['measurement'] ?? null,
                     $item['quantity'] ?? null,
                     $item['execution_time'] ?? null,
-                    $item['target_date'] ?? ($item['targetDate'] ?? null),
+                    $item['target_date'] ?? null,
                     $item['budget'] ?? null,
                     $item['remarks'] ?? null,
                     $monthsJson,
-                    (int)($item['progress_percent'] ?? ($item['progress'] ?? 0)),
+                    (int)($item['progress_percent'] ?? 0),
                     $item['status'] ?? 'in_progress',
                     $item['priority'] ?? 'medium',
                     $item['assigned_to'] ?? null,
@@ -141,32 +152,34 @@ if ($method === 'POST') {
                 $importedCount++;
             }
             $pdo->commit();
-            logAudit($pdo, 'bulk_import_plans', 'plans', null, $auth['user_id'] ?? null, $auth['department_id'] ?? null, ['count' => $importedCount]);
-            jsonResponse(['message' => "$importedCount እቅዶች በተሳካ ሁኔታ ተመሳክረዋል/ተጭነዋል", 'count' => $importedCount]);
+            logAudit($pdo, 'bulk_import_plans', 'plans', null, $auth['user_id'], $auth['department_id'], ['count' => $importedCount]);
+            jsonResponse(['message' => "$importedCount እቅዶች በተሳካ ሁኔታ ተጭነዋል", 'count' => $importedCount]);
         } catch (\Exception $e) {
             $pdo->rollBack();
             jsonError('የጅምላ እቅዶችን ማስገባት አልተቻለም፡ ' . $e->getMessage(), 500);
         }
     }
 
-    // ነጠላ እቅድ ማዘመን ወይም መፍጠር
-    if (empty($input['id'])) {
-        $input['id'] = 'plan_' . time() . '_' . rand(100, 999);
+    // ነጠላ እቅድ መፍጠር ወይም ማሻሻል
+    $id = !empty($input['id']) ? $input['id'] : ('plan_' . time() . '_' . rand(100, 999));
+    
+    // የክፍል መለያን በሰርቨር ማረጋገጥ (ፅ/ቤት ካልሆነ በስተቀር የራሱን ክፍል ብቻ ነው የሚመዘግበው!)
+    if (!empty($input['department_id']) && !$auth['is_super_admin'] && $input['department_id'] !== $auth['department_id']) {
+        jsonError('የተከለከለ ክንውን! በሌላ ክፍል ስም እቅድ መፍጠር ወይም ማሻሻል አይችሉም (Forbidden)', 403);
     }
+    $deptId = $auth['is_super_admin'] ? ($input['department_id'] ?? $auth['department_id']) : $auth['department_id'];
 
-    $id = $input['id'];
-    $deptId = $input['department_id'] ?? ($auth['department_id'] ?? 'education');
     $subDept = $input['sub_department'] ?? null;
     $mainTask = trim($input['main_task'] ?? ($input['title'] ?? ''));
     $detailTask = trim($input['detail_task'] ?? ($input['description'] ?? ''));
     $measurement = $input['measurement'] ?? null;
     $quantity = $input['quantity'] ?? null;
     $executionTime = $input['execution_time'] ?? null;
-    $targetDate = $input['target_date'] ?? ($input['targetDate'] ?? null);
+    $targetDate = $input['target_date'] ?? null;
     $budget = $input['budget'] ?? null;
     $remarks = $input['remarks'] ?? null;
     $monthsJson = isset($input['months']) ? json_encode($input['months'], JSON_UNESCAPED_UNICODE) : ($input['months_json'] ?? null);
-    $progress = (int)($input['progress_percent'] ?? ($input['progress'] ?? 0));
+    $progress = (int)($input['progress_percent'] ?? 0);
     $status = $input['status'] ?? ($progress >= 100 ? 'completed' : 'in_progress');
     $priority = $input['priority'] ?? 'medium';
     $assignedTo = $input['assigned_to'] ?? null;
@@ -176,12 +189,15 @@ if ($method === 'POST') {
         jsonError('የዕቅዱ ዋና ተግባር ወይም ርዕስ ያስፈልጋል', 400);
     }
 
-    // ያለውን ማረጋገጥ
-    $checkStmt = $pdo->prepare("SELECT id FROM plans WHERE id = ?");
+    // ያለውን እቅድ ማረጋገጥ
+    $checkStmt = $pdo->prepare("SELECT department_id FROM plans WHERE id = ?");
     $checkStmt->execute([$id]);
-    $exists = $checkStmt->fetch();
+    $existing = $checkStmt->fetch();
 
-    if ($exists) {
+    if ($existing) {
+        // የሌላ ክፍልን እቅድ እንዳያሻሽል ማረጋገጥ
+        requireDepartmentOrAdmin($auth, $existing['department_id']);
+
         $updateStmt = $pdo->prepare("
             UPDATE plans SET
                 department_id = ?, sub_department = ?, main_task = ?, detail_task = ?,
@@ -198,7 +214,7 @@ if ($method === 'POST') {
             $id
         ]);
         $msg = 'ዕቅዱ በተሳካ ሁኔታ ተሻሽሏል';
-        logAudit($pdo, 'update_plan', 'plans', $id, $auth['user_id'] ?? null, $deptId, ['main_task' => $mainTask]);
+        logAudit($pdo, 'update_plan', 'plans', $id, $auth['user_id'], $deptId, ['main_task' => $mainTask]);
     } else {
         $insertStmt = $pdo->prepare("
             INSERT INTO plans (
@@ -220,29 +236,31 @@ if ($method === 'POST') {
             $assignedTo, $syncId
         ]);
         $msg = 'አዲስ ዕቅድ በተሳካ ሁኔታ ተመዝግቧል';
-        logAudit($pdo, 'create_plan', 'plans', $id, $auth['user_id'] ?? null, $deptId, ['main_task' => $mainTask]);
-
-        // እቅድ ሲፈጠር ለክፍሉ አዲስ ማሳወቂያ መላክ
-        try {
-            $notifId = 'notif_' . uniqid();
-            $notifStmt = $pdo->prepare("INSERT INTO notifications (id, department_id, title, message, type, target_id) VALUES (?, ?, ?, ?, 'plan_assigned', ?)");
-            $notifStmt->execute([$notifId, $deptId, 'አዲስ ዕቅድ ተመድቧል', "ለክፍልዎ አዲስ ተግባር ተመዝግቧል፦ $mainTask", $id]);
-        } catch (\Exception $e) {}
+        logAudit($pdo, 'create_plan', 'plans', $id, $auth['user_id'], $deptId, ['main_task' => $mainTask]);
     }
 
-    jsonResponse(['message' => $msg, 'id' => $id, 'progress_percent' => $progress, 'status' => $status]);
+    $statusCode = $existing ? 200 : 201;
+    jsonResponse(['message' => $msg, 'id' => $id, 'progress_percent' => $progress, 'status' => $status], $statusCode);
 }
 
-// 3. እቅድ ማሻሻል (PUT Plan)
+// 3. እቅድ ማሻሻል (PUT Progress update)
 if ($method === 'PUT') {
-    $auth = authenticateRequest();
     $input = getJsonInput();
-
     if (empty($input['id'])) {
         jsonError('የዕቅድ መለያ (ID) ያስፈልጋል', 400);
     }
 
     $id = $input['id'];
+    $checkStmt = $pdo->prepare("SELECT department_id FROM plans WHERE id = ?");
+    $checkStmt->execute([$id]);
+    $existing = $checkStmt->fetch();
+
+    if (!$existing) {
+        jsonError('እቅዱ አልተገኘም', 404);
+    }
+
+    requireDepartmentOrAdmin($auth, $existing['department_id']);
+
     $progress = isset($input['progress_percent']) ? (int)$input['progress_percent'] : null;
     $status = $input['status'] ?? null;
 
@@ -254,7 +272,7 @@ if ($method === 'PUT') {
         $stmt->execute([$progress, $status, $id]);
     }
 
-    logAudit($pdo, 'update_plan_progress', 'plans', $id, $auth['user_id'] ?? null, $auth['department_id'] ?? null, [
+    logAudit($pdo, 'update_plan_progress', 'plans', $id, $auth['user_id'], $existing['department_id'], [
         'progress_percent' => $progress,
         'status' => $status
     ]);
@@ -262,22 +280,20 @@ if ($method === 'PUT') {
     jsonResponse(['message' => 'የዕቅዱ ክንውን ተሻሽሏል', 'id' => $id]);
 }
 
-// 4. እቅድ መሰረዝ (DELETE Plan — Soft Delete)
+// 4. እቅድ መሰረዝ (DELETE Plan — ፅ/ቤት ብቻ ነው መሰረዝ የሚችለው!)
 if ($method === 'DELETE') {
-    $auth = authenticateRequest();
+    requireSuperAdmin($auth);
     $id = $_GET['id'] ?? (getJsonInput()['id'] ?? null);
 
     if (empty($id)) {
         jsonError('የዕቅድ መለያ (ID) ያስፈልጋል', 400);
     }
 
-    // Soft delete እናደርጋለን
     $stmt = $pdo->prepare("UPDATE plans SET is_deleted = 1, version = version + 1 WHERE id = ?");
     $stmt->execute([$id]);
 
-    logAudit($pdo, 'delete_plan', 'plans', $id, $auth['user_id'] ?? null, $auth['department_id'] ?? null);
-
+    logAudit($pdo, 'delete_plan', 'plans', $id, $auth['user_id'], $auth['department_id']);
     jsonResponse(['message' => 'ዕቅዱ በተሳካ ሁኔታ ተሰርዟል', 'id' => $id]);
 }
 
-jsonError('ያልተፈቀደ ዘዴ (Method not allowed)', 405);
+jsonError('ያልተፈቀደ ዘዴ', 405);

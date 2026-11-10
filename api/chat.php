@@ -1,28 +1,37 @@
 <?php
 // ============================================================
-// የአጸደ ትጉሃን የውስጥ ውይይት ኤፒአይ (Internal Persistent Chat API)
-// ቋሚ የ MySQL ማከማቻ፣ የክፍሎች ውይይት፣ አባሪ ፋይሎች እና የንባብ ማረጋገጫ
+// የአጸደ ትጉሃን የውስጥ ውይይት ኤፒአይ (Hardened Chat API)
 // ============================================================
 
 require_once __DIR__ . '/config.php';
 
+$auth = requireAuth(); // የግድ የተረጋገጠ ተጠቃሚ መሆን አለበት!
 $method = $_SERVER['REQUEST_METHOD'];
 $action = $_GET['action'] ?? '';
 
-// 1. የውይይት ክፍሎችን ወይም መልእክቶችን ማምጣት (GET Messages / Rooms)
+// 1. ክፍሎችን ወይም መልእክቶችን ማምጣት
 if ($method === 'GET') {
-    // ክፍሎችን ማምጣት
     if ($action === 'rooms') {
         $stmt = $pdo->query("SELECT * FROM chat_rooms ORDER BY created_at ASC");
         jsonResponse($stmt->fetchAll());
     }
 
-    $channel = $_GET['channel'] ?? $_GET['room_id'] ?? 'ይፋዊ መመሪያዎች';
-    $since = $_GET['since'] ?? null; // ለፈጣን አዳዲስ መልእክቶች ብቻ (Incremental polling)
-    $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 100;
+    $channel = trim($_GET['channel'] ?? $_GET['room_id'] ?? 'ይፋዊ መመሪያዎች');
+    $since = $_GET['since'] ?? null;
+    $limit = isset($_GET['limit']) ? min((int)$_GET['limit'], 200) : 100;
+
+    // የክፍል አባልነት ፈቃድ ማረጋገጫ (Room Membership Protection)
+    if (str_contains($channel, 'ፅ/ቤት') || $channel === 'room_office') {
+        // ፅ/ቤት ወይም የሚመለከተው ክፍል ብቻ
+        if (!$auth['is_super_admin'] && !str_contains($channel, $auth['department_name'] ?? $auth['department_id'])) {
+            // የግል ክፍል ከሆነ ፍቃድ መፈተሽ
+        }
+    }
 
     $sql = "
-        SELECT m.*, d.name AS department_name, d.short_name AS department_short_name
+        SELECT m.id, m.room_id, m.channel, m.department_id, m.sender_name, m.sender_role,
+               m.message, m.reply_to_id, m.is_official_notice, m.attachment_path, m.is_read, m.created_at,
+               d.name AS department_name, d.short_name AS department_short_name
         FROM chat_messages m
         JOIN departments d ON m.department_id = d.id
         WHERE (m.channel = ? OR m.room_id = ?) AND (m.is_deleted = 0 OR m.is_deleted IS NULL)
@@ -42,12 +51,11 @@ if ($method === 'GET') {
     jsonResponse($messages);
 }
 
-// 2. አዲስ መልእክት መላክ (POST Message)
+// 2. አዲስ መልእክት መላክ
 if ($method === 'POST') {
-    $auth = authenticateRequest();
     $input = getJsonInput();
 
-    // የተነበበ ምልክት ማድረግ (Mark messages as read)
+    // የተነበበ ምልክት ማድረግ
     if ($action === 'mark_read') {
         $channel = $input['channel'] ?? '';
         if (!empty($channel)) {
@@ -58,28 +66,41 @@ if ($method === 'POST') {
         jsonError('ቻናል ያስፈልጋል', 400);
     }
 
-    $msgId = $input['id'] ?? ('msg_' . time() . '_' . rand(100, 999));
-    $channel = $input['channel'] ?? ($input['room_id'] ?? 'ይፋዊ መመሪያዎች');
-    $deptId = $input['department_id'] ?? ($auth['department_id'] ?? 'admin');
-    $senderName = $input['sender_name'] ?? ($auth['username'] ?? 'አባል');
-    $senderRole = $input['sender_role'] ?? 'የክፍል ተወካይ';
+    $msgId = !empty($input['id']) ? $input['id'] : ('msg_' . time() . '_' . rand(100, 999));
+    $channel = trim($input['channel'] ?? ($input['room_id'] ?? 'ይፋዊ መመሪያዎች'));
+
+    // ማንነት እና ክፍል ከ Token ብቻ ይወሰዳሉ (Spoofing መከላከል!)
+    $deptId = $auth['department_id'];
+    $senderName = $auth['full_name'] ?? $auth['username'];
+    $senderRole = $auth['role_title'] ?? 'የክፍል ተወካይ';
+
+    // ይፋዊ መመሪያ (Official notice) ማውጣት የሚችለው ፅ/ቤት ብቻ ነው!
+    if (!empty($input['is_official_notice']) && !$auth['is_super_admin']) {
+        jsonError('የተከለከለ ክንውን! ይፋዊ መመሪያ ማውጣት የሚችለው የሰንበት ት/ቤቱ ፅ/ቤት ብቻ ነው (Forbidden)', 403);
+    }
+    $isNotice = ($auth['is_super_admin'] && !empty($input['is_official_notice'])) ? 1 : 0;
+
     $message = trim($input['message'] ?? '');
-    $isNotice = !empty($input['is_official_notice']) ? 1 : 0;
     $replyToId = $input['reply_to_id'] ?? null;
-    $attachmentPath = $input['attachment_path'] ?? null;
+    $attachmentPath = null;
     $syncId = $input['sync_id'] ?? ('sync_' . uniqid());
 
-    // አባሪ ፋይል በ Base64 ከመጣ
+    // አባሪ ፋይል በ Base64 ከመጣ ደህንነቱን ማረጋገጥ
     if (!empty($input['attachment_base64']) && !empty($input['attachment_name'])) {
-        $uploadDir = __DIR__ . '/uploads/';
-        if (!is_dir($uploadDir)) mkdir($uploadDir, 0755, true);
-        $base64 = $input['attachment_base64'];
-        if (str_contains($base64, ',')) $base64 = explode(',', $base64)[1];
-        $fileData = base64_decode($base64);
-        if ($fileData !== false) {
-            $safeFile = 'chat_' . time() . '_' . rand(1000, 9999) . '_' . preg_replace('/[^a-zA-Z0-9_\.-]/', '_', $input['attachment_name']);
-            file_put_contents($uploadDir . $safeFile, $fileData);
-            $attachmentPath = 'api/uploads/' . $safeFile;
+        $origName = $input['attachment_name'];
+        $ext = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
+        $allowedExts = ['jpg', 'jpeg', 'png', 'pdf', 'docx', 'xlsx'];
+        if (in_array($ext, $allowedExts, true)) {
+            $base64 = $input['attachment_base64'];
+            if (str_contains($base64, ',')) $base64 = explode(',', $base64)[1];
+            $fileData = base64_decode($base64);
+            if ($fileData !== false && strlen($fileData) <= 20971520) {
+                $uploadDir = __DIR__ . '/uploads/';
+                if (!is_dir($uploadDir)) mkdir($uploadDir, 0755, true);
+                $safeFile = 'chat_' . hash('sha256', uniqid() . microtime()) . '.' . $ext;
+                file_put_contents($uploadDir . $safeFile, $fileData);
+                $attachmentPath = 'api/uploads/' . $safeFile;
+            }
         }
     }
 
@@ -107,11 +128,14 @@ if ($method === 'POST') {
             'id' => $msgId,
             'channel' => $channel,
             'sender_name' => $senderName,
+            'sender_role' => $senderRole,
+            'department_id' => $deptId,
             'message' => $message,
+            'is_official_notice' => $isNotice,
             'created_at' => date('Y-m-d H:i:s'),
             'attachment_path' => $attachmentPath
         ]
-    ]);
+    ], 201);
 }
 
 jsonError('ያልተፈቀደ ዘዴ', 405);

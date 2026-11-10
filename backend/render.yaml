@@ -6,8 +6,10 @@ services:
     startCommand: python bot_server.py
     envVars:
       - key: BOT_TOKEN
-        value: 8787655703:AAEKUtBab8oi8rIUiwnV3n7HMDpTW63Cehk
+        sync: false # Set securely in Render Dashboard (Never put secret tokens in repository)
       - key: CHAT_ID
-        value: 1537845176
+        sync: false
       - key: PORT
         value: 10000
+      - key: PHP_API_BASE
+        sync: false

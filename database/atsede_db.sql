@@ -109,6 +109,6 @@ CREATE TABLE IF NOT EXISTS `system_settings` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT INTO `system_settings` (`setting_key`, `setting_value`) VALUES
-('telegram_bot_token', '8754142388:AAGKJUQ9PoeCgrlFNRQQlXEPy4uldnAP_c8'),
+('telegram_bot_token', ''),
 ('telegram_chat_id', '')
 ON DUPLICATE KEY UPDATE `setting_value`=VALUES(`setting_value`);

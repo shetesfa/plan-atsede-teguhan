@@ -100,7 +100,7 @@ class ChatService extends ChangeNotifier {
       _allMessages.where((m) => m.channel == channel).toList();
 
   Future<void> init() async {
-    _loadCachedMessages();
+    await _loadCachedMessages();
     _startPolling();
   }
 
@@ -121,7 +121,7 @@ class ChatService extends ChangeNotifier {
             _allMessages.add(msg);
           }
         }
-        _saveToCache();
+        await _saveToCache();
         _emit();
         notifyListeners();
       }
@@ -130,7 +130,7 @@ class ChatService extends ChangeNotifier {
 
   void _startPolling() {
     _pollingTimer?.cancel();
-    _pollingTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+    _pollingTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       refreshMessages(_activeChannel);
     });
   }
@@ -148,12 +148,8 @@ class ChatService extends ChangeNotifier {
         }
         _emit();
         notifyListeners();
-      } else {
-        _seedDefaultMessages();
       }
-    } catch (_) {
-      _seedDefaultMessages();
-    }
+    } catch (_) {}
   }
 
   Future<void> _saveToCache() async {
@@ -164,50 +160,14 @@ class ChatService extends ChangeNotifier {
     } catch (_) {}
   }
 
-  void _seedDefaultMessages() {
-    final now = _timeNow();
-    _allMessages.addAll([
-      ChatMessage(
-        id: 'seed_001',
-        channel: 'ይፋዊ መመሪያዎች',
-        senderName: 'ዲ/ን ቴዎድሮስ',
-        senderRole: 'የፅ/ቤት ዋና ጸሐፊ',
-        senderDept: 'ጽ/ቤት',
-        message: 'በስመ አብ ወወልድ ወመንፈስ ቅዱስ አሐዱ አምላክ አሜን። የተከበራችሁ የ10ሩም ክፍሎች ኃላፊዎች፡ የ2019 ዓ.ም የ1ኛ ሩብ ዓመት እቅድ ክንውን ሪፖርታችሁን እንድታጠናቅቁ በጥብቅ እናሳስባለን።',
-        time: '09:30',
-        dateLabel: 'ዛሬ',
-        isMe: false,
-        isOfficialNotice: true,
-        attachmentName: 'የሩብ_ዓመት_ሪፖርት_መመሪያ.pdf',
-        status: MessageStatus.delivered,
-      ),
-      ChatMessage(
-        id: 'seed_002',
-        channel: 'የአመራሮች አጠቃላይ ጉባኤ',
-        senderName: 'ተስፋሁን ባይህ',
-        senderRole: 'የትምህርት ኃላፊ',
-        senderDept: 'ትምህርት ክፍል',
-        message: 'የቤተ-መጻሕፍት ደንብ ተዘጋጅቷል፤ ወደ PDF አውጥተን ለፅ/ቤት ልከናል።',
-        time: now,
-        dateLabel: 'ዛሬ',
-        isMe: false,
-        status: MessageStatus.delivered,
-      ),
-      ChatMessage(
-        id: 'seed_003',
-        channel: 'ከፅ/ቤት ጋር ቀጥታ',
-        senderName: 'ዲ/ን ቴዎድሮስ',
-        senderRole: 'የፅ/ቤት ዋና ጸሐፊ',
-        senderDept: 'ጽ/ቤት',
-        message: 'ሰላም! ይህ ቀጥታ መስመር ሚስጥራዊ ይዘቶችን ለሚልኩ ነው።',
-        time: now,
-        dateLabel: 'ዛሬ',
-        isMe: false,
-        status: MessageStatus.delivered,
-      ),
-    ]);
+  Future<void> clearCache() async {
+    _allMessages.clear();
     _emit();
     notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('atsede_chat_cache');
+    } catch (_) {}
   }
 
   Future<void> sendMessage({
@@ -242,17 +202,13 @@ class ChatService extends ChangeNotifier {
     _allMessages.add(localMsg);
     _emit();
     notifyListeners();
-    _saveToCache();
+    await _saveToCache();
 
-    // ወደ ባክኤንድ መላክ
     try {
       final res = await ApiService().sendChatMessage({
         'id': id,
         'channel': channel,
         'room_id': channel,
-        'department_id': senderDept,
-        'sender_name': senderName,
-        'sender_role': senderRole,
         'message': message,
         'is_official_notice': isOfficialNotice ? 1 : 0,
         'attachment_path': attachmentName,
@@ -265,7 +221,7 @@ class ChatService extends ChangeNotifier {
         );
         _emit();
         notifyListeners();
-        _saveToCache();
+        await _saveToCache();
       }
     } catch (_) {
       final idx = _allMessages.indexWhere((m) => m.id == id);
