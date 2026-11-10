@@ -67,10 +67,8 @@ if (!empty($origin)) {
         echo json_encode(['status' => 'error', 'message' => 'የተከለከለ የ CORS መዳረሻ (Untrusted Origin)'], JSON_UNESCAPED_UNICODE);
         exit;
     }
-} else {
-    // ከሞባይል መተግበሪያ ወይም ቀጥታ ከአገልጋይ የሚመጣ ጥያቄ (Empty origin)
-    header("Access-Control-Allow-Origin: " . ($allowedOrigins[0] ?? 'http://127.0.0.1'));
 }
+// ማሳሰቢያ፦ $origin ከሌለ (ከሞባይል መተግበሪያ ወይም ቀጥታ ከአገልጋይ የመጣ ከሆነ) ምንም የ Access-Control-Allow-Origin ራስጌ አይላክም (No arbitrary echo)
 
 header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Device-ID");
 header("Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS");
@@ -98,14 +96,25 @@ if (empty($jwtSecret) || strlen($jwtSecret) < 32) {
 }
 
 // 6. የዳታቤዝ ምስክርነቶች ከ .env ብቻ (No hardcoded credentials)
+$appEnv = getenv('APP_ENV') ?: 'production';
 $dbHost = getenv('DB_HOST') ?: '127.0.0.1';
 $dbName = getenv('DB_NAME') ?: 'atsede_db';
 $dbUser = getenv('DB_USER');
 $dbPass = getenv('DB_PASS');
 $dbCharset = getenv('DB_CHARSET') ?: 'utf8mb4';
 
-if ($dbUser === false || $dbUser === null) {
-    jsonError('የዳታቤዝ ምስክርነት (DB_USER) አልተዋቀረም። እባክዎ .env ፋይልዎን ያረጋግጡ።', 500);
+if ($dbUser === false || $dbUser === null || trim($dbUser) === '') {
+    jsonError('የዳታቤዝ ተጠቃሚ ስም (DB_USER) አልተዋቀረም። እባክዎ .env ፋይልዎን ያረጋግጡ።', 500);
+}
+
+// DB_PASS ካልተዋቀረ አገልጋዩ ስራውን ማቆም አለበት (Never silently substitute an empty password)
+if ($dbPass === false || $dbPass === null) {
+    jsonError('የዳታቤዝ ምስክርነት (DB_PASS) አልተዋቀረም! አገልጋዩ በደህንነት ምክንያት ስራውን አቁሟል።', 500);
+}
+
+// በምርት (Production) አካባቢ ባዶ የይለፍ ቃል በጥብቅ የተከለከለ ነው
+if ($appEnv === 'production' && trim($dbPass) === '') {
+    jsonError('በምርት አካባቢ (production) ላይ ባዶ የዳታቤዝ የይለፍ ቃል መጠቀም በጥብቅ የተከለከለ ነው (Empty DB_PASS is forbidden).', 500);
 }
 
 $dsn = "mysql:host=$dbHost;dbname=$dbName;charset=$dbCharset";
@@ -268,15 +277,65 @@ function requireResourceOwnership(array $auth, string $resourceDeptId, string $r
     }
 }
 
+// 9. አስተማማኝ የደንበኛ IP አድራሻ ፈላጊ (Reverse Proxy Aware)
+function getClientIp(): string {
+    $remoteIp = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+    $trustedProxiesStr = getenv('TRUSTED_PROXIES') ?: '';
+    if (!empty($trustedProxiesStr)) {
+        $trustedProxies = array_filter(array_map('trim', explode(',', $trustedProxiesStr)));
+        if (in_array($remoteIp, $trustedProxies, true)) {
+            $forwarded = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? '';
+            if (!empty($forwarded)) {
+                $ips = array_map('trim', explode(',', $forwarded));
+                $client = $ips[0] ?? '';
+                if (filter_var($client, FILTER_VALIDATE_IP)) {
+                    return $client;
+                }
+            }
+        }
+    }
+    return $remoteIp;
+}
+
 function requireChatRoomMembership(array $auth, string $roomOrChannel): void {
+    global $pdo;
     $room = trim($roomOrChannel);
-    // 1. ይፋዊ ቻናሎች ለሁሉም ክፍሎች ክፍት ናቸው
-    $publicChannels = ['ይፋዊ መመሪያዎች', 'general', 'ጠቅላላ ውይይት', 'public', 'all'];
+
+    // 1. በዳታቤዝ ውስጥ ሩሙን መፈለግ (Database-backed Membership Model)
+    if ($pdo !== null) {
+        try {
+            $rStmt = $pdo->prepare("SELECT id, name, type, target_department_id, is_office_only, is_public FROM chat_rooms WHERE id = ? OR name = ? LIMIT 1");
+            $rStmt->execute([$room, $room]);
+            $dbRoom = $rStmt->fetch();
+            if ($dbRoom) {
+                if (!empty($dbRoom['is_public'])) {
+                    return; // ይፋዊ ሩም
+                }
+                if (!empty($dbRoom['is_office_only'])) {
+                    if (empty($auth['is_super_admin'])) {
+                        jsonError('የተከለከለ ክንውን! የፅ/ቤት የውስጥ ውይይትን ማግኘት የሚችሉት የፅ/ቤት አባላት ብቻ ናቸው (Forbidden).', 403);
+                    }
+                    return;
+                }
+                if (!empty($dbRoom['target_department_id'])) {
+                    if (empty($auth['is_super_admin']) && $auth['department_id'] !== $dbRoom['target_department_id']) {
+                        jsonError("የተከለከለ ክንውን! የዚህ ክፍል (" . $dbRoom['target_department_id'] . ") አባል ባለመሆንዎ ውይይቱን ማግኘት አይችሉም (Forbidden).", 403);
+                    }
+                    return;
+                }
+            }
+        } catch (\Exception $e) {
+            error_log("requireChatRoomMembership DB lookup error: " . $e->getMessage());
+        }
+    }
+
+    // 2. ነባሪ ህጎች (Fallback rules)
+    $publicChannels = ['ይፋዊ መመሪያዎች', 'general', 'ጠቅላላ ውይይት', 'public', 'all', 'room_official', 'room_leaders', 'room_docs'];
     if (in_array($room, $publicChannels, true)) {
         return;
     }
 
-    // 2. የፅ/ቤት የግል ቻናል ለፅ/ቤት ብቻ
+    // የፅ/ቤት የግል ቻናል ለፅ/ቤት ብቻ
     if ($room === 'office' || $room === 'ፅ/ቤት' || $room === 'room_office') {
         if (empty($auth['is_super_admin'])) {
             jsonError('የተከለከለ ክንውን! የፅ/ቤት የውስጥ ውይይትን ማግኘት የሚችሉት የፅ/ቤት አባላት ብቻ ናቸው (Forbidden).', 403);
@@ -284,7 +343,7 @@ function requireChatRoomMembership(array $auth, string $roomOrChannel): void {
         return;
     }
 
-    // 3. የክፍል ውስጣዊ ቻናሎች (ለምሳሌ dept_education, dept_mezmur)
+    // የክፍል ውስጣዊ ቻናሎች (ለምሳሌ dept_education, dept_mezmur)
     if (str_starts_with($room, 'dept_')) {
         $targetDept = substr($room, 5);
         if (empty($auth['is_super_admin']) && $auth['department_id'] !== $targetDept) {
@@ -317,7 +376,9 @@ function checkRateLimit(PDO $pdo, string $key, int $maxAttempts = 5, int $decayM
                 jsonError("የመግቢያ ሙከራ ገደብ አልፏል! ስርዓቱ ለ $decayMinutes ደቂቃ ተቆልፏል።", 429);
             }
         }
-    } catch (\Exception $e) {}
+    } catch (\Exception $e) {
+        error_log("Rate limit DB check error: " . $e->getMessage());
+    }
 }
 
 function recordFailedLoginAttempt(PDO $pdo, string $key): void {
@@ -328,21 +389,27 @@ function recordFailedLoginAttempt(PDO $pdo, string $key): void {
             ON DUPLICATE KEY UPDATE attempts = attempts + 1, last_attempt = NOW()
         ");
         $stmt->execute([$key]);
-    } catch (\Exception $e) {}
+    } catch (\Exception $e) {
+        error_log("Record failed login DB error: " . $e->getMessage());
+    }
 }
 
 function clearRateLimit(PDO $pdo, string $key): void {
     try {
         $pdo->prepare("DELETE FROM login_attempts WHERE attempt_key = ?")->execute([$key]);
-    } catch (\Exception $e) {}
+    } catch (\Exception $e) {
+        error_log("Clear rate limit DB error: " . $e->getMessage());
+    }
 }
 
 // 11. የስራ ታሪክ መመዝገቢያ ረዳት (Audit Logger)
 function logAudit(PDO $pdo, string $action, string $entityType, ?string $entityId, ?int $userId, ?string $deptId, $details = null): void {
     try {
-        $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+        $ip = getClientIp();
         $detailsJson = $details ? json_encode($details, JSON_UNESCAPED_UNICODE) : null;
         $stmt = $pdo->prepare("INSERT INTO audit_logs (user_id, department_id, action, entity_type, entity_id, details, ip_address) VALUES (?, ?, ?, ?, ?, ?, ?)");
         $stmt->execute([$userId, $deptId, $action, $entityType, $entityId, $detailsJson, $ip]);
-    } catch (\Exception $e) {}
+    } catch (\Exception $e) {
+        error_log("Audit log DB error: " . $e->getMessage());
+    }
 }

@@ -2,7 +2,7 @@
 -- የአጸደ ትጉሃን የደህንነት ማጠናከሪያ ስክሪፕት (Migration 02: Security & Hardening)
 -- ============================================================
 
-USE `atsede_db`;
+-- የውሂብ ጎታ ምርጫ የሚከናወነው በአገልጋዩ ውቅር (PDO DSN) አማካኝነት ነው (No hardcoded USE db)
 
 -- 1. የመግቢያ ሙከራዎችን መከታተያ (Rate Limiting Table)
 CREATE TABLE IF NOT EXISTS `login_attempts` (

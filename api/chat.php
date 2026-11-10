@@ -12,8 +12,18 @@ $action = $_GET['action'] ?? '';
 // 1. ክፍሎችን ወይም መልእክቶችን ማምጣት
 if ($method === 'GET') {
     if ($action === 'rooms') {
-        $stmt = $pdo->query("SELECT * FROM chat_rooms ORDER BY created_at ASC");
-        jsonResponse($stmt->fetchAll());
+        if ($auth['is_super_admin']) {
+            $stmt = $pdo->query("SELECT * FROM chat_rooms ORDER BY created_at ASC");
+            jsonResponse($stmt->fetchAll());
+        } else {
+            $stmt = $pdo->prepare("
+                SELECT * FROM chat_rooms 
+                WHERE is_public = 1 OR target_department_id = ? OR (type = 'general' AND is_office_only = 0)
+                ORDER BY created_at ASC
+            ");
+            $stmt->execute([$auth['department_id']]);
+            jsonResponse($stmt->fetchAll());
+        }
     }
 
     $channel = trim($_GET['channel'] ?? $_GET['room_id'] ?? 'ይፋዊ መመሪያዎች');
@@ -25,13 +35,16 @@ if ($method === 'GET') {
 
     $sql = "
         SELECT m.id, m.room_id, m.channel, m.department_id, m.sender_name, m.sender_role,
-               m.message, m.reply_to_id, m.is_official_notice, m.attachment_path, m.is_read, m.created_at,
+               m.message, m.reply_to_id, m.is_official_notice, m.created_at,
+               IF(cmr.id IS NOT NULL, 1, 0) AS is_read,
+               IF(m.attachment_path IS NOT NULL, CONCAT('api/files.php?id=', m.id, '&type=chat'), NULL) AS attachment_url,
                d.name AS department_name, d.short_name AS department_short_name
         FROM chat_messages m
         JOIN departments d ON m.department_id = d.id
+        LEFT JOIN chat_message_reads cmr ON cmr.message_id = m.id AND cmr.user_id = ?
         WHERE (m.channel = ? OR m.room_id = ?) AND (m.is_deleted = 0 OR m.is_deleted IS NULL)
     ";
-    $params = [$channel, $channel];
+    $params = [$auth['user_id'], $channel, $channel];
 
     if ($since) {
         $sql .= " AND m.created_at > ?";
@@ -50,13 +63,18 @@ if ($method === 'GET') {
 if ($method === 'POST') {
     $input = getJsonInput();
 
-    // የተነበበ ምልክት ማድረግ
+    // የተነበበ ምልክት ማድረግ (Per-User Read Receipts)
     if ($action === 'mark_read') {
         $channel = trim($input['channel'] ?? ($input['room_id'] ?? ''));
         if (!empty($channel)) {
             requireChatRoomMembership($auth, $channel);
-            $stmt = $pdo->prepare("UPDATE chat_messages SET is_read = 1 WHERE channel = ? OR room_id = ?");
-            $stmt->execute([$channel, $channel]);
+            $stmt = $pdo->prepare("
+                INSERT IGNORE INTO chat_message_reads (message_id, user_id, read_at)
+                SELECT id, ?, NOW()
+                FROM chat_messages
+                WHERE (channel = ? OR room_id = ?) AND (is_deleted = 0 OR is_deleted IS NULL)
+            ");
+            $stmt->execute([$auth['user_id'], $channel, $channel]);
             jsonResponse(['message' => 'መልእክቶቹ እንደተነበቡ ተደርገዋል']);
         }
         jsonError('ቻናል ያስፈልጋል', 400);
@@ -121,17 +139,15 @@ if ($method === 'POST') {
 
     jsonResponse([
         'message' => 'መልእክቱ ተልኳል',
-        'data' => [
-            'id' => $msgId,
-            'channel' => $channel,
-            'sender_name' => $senderName,
-            'sender_role' => $senderRole,
-            'department_id' => $deptId,
-            'message' => $message,
-            'is_official_notice' => $isNotice,
-            'created_at' => date('Y-m-d H:i:s'),
-            'attachment_path' => $attachmentPath
-        ]
+        'id' => $msgId,
+        'channel' => $channel,
+        'sender_name' => $senderName,
+        'sender_role' => $senderRole,
+        'department_id' => $deptId,
+        'message' => $message,
+        'is_official_notice' => $isNotice,
+        'created_at' => date('Y-m-d H:i:s'),
+        'attachment_path' => $attachmentPath
     ], 201);
 }
 

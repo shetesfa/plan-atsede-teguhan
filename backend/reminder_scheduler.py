@@ -19,9 +19,12 @@ def check_and_send_reminders():
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
 
     try:
-        # 1. እቅዶችን ማምጣት
-        res = requests.get(f"{api_base}/plans.php", timeout=10)
+        # 1. እቅዶችን ማምጣት (የተጠበቀ ኤፒአይ መዳረሻ በ Authorization Header)
+        system_token = os.environ.get("SYSTEM_API_TOKEN", "")
+        headers = {"Authorization": f"Bearer {system_token}"} if system_token else {}
+        res = requests.get(f"{api_base}/plans.php", headers=headers, timeout=10)
         if res.status_code != 200:
+            print(f"[{get_current_ethiopian_time().strftime('%H:%M:%S')}] Plans API returned status: {res.status_code}")
             return
         data = res.json()
         plans = data.get("data", [])

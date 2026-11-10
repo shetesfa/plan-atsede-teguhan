@@ -77,7 +77,15 @@ if ($method === 'POST') {
     $recipient = $input['recipient'] ?? null;
     $date = $input['date'] ?? date('d/m/Y');
     $contentJson = json_encode($input['content'] ?? $input, JSON_UNESCAPED_UNICODE);
-    $pdfPath = $input['pdf_file_path'] ?? null;
+    
+    // ደህንነቱ የተጠበቀ የ PDF ፋይል ማጣቀሻ (Path Traversal Protection)
+    $pdfPath = null;
+    if (!empty($input['pdf_file_path'])) {
+        $cleanPdf = basename(trim($input['pdf_file_path']));
+        if (!empty($cleanPdf) && preg_match('/^[a-zA-Z0-9_\-\.]+\.pdf$/i', $cleanPdf)) {
+            $pdfPath = 'api/uploads/' . $cleanPdf;
+        }
+    }
 
     $stmt = $pdo->prepare("
         INSERT INTO documents (

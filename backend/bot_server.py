@@ -50,11 +50,21 @@ BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else ""
 
 app = Flask(__name__)
 
+# የተፈቀዱ CORS አመጣጦች (Restricted Origins Only — Never use '*')
+ALLOWED_ORIGINS = [
+    o.strip() for o in os.environ.get(
+        "ALLOWED_ORIGINS", 
+        "http://localhost:3000,http://127.0.0.1:8000,http://localhost:8080,http://127.0.0.1"
+    ).split(",") if o.strip()
+]
+
 @app.after_request
 def add_cors_headers(response):
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
-    response.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
+    origin = request.headers.get("Origin", "")
+    if origin and origin in ALLOWED_ORIGINS:
+        response.headers['Access-Control-Allow-Origin'] = origin
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+        response.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
     return response
 
 def get_plans_from_database(dept=None):

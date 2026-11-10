@@ -3,13 +3,14 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class ApiService {
   static final ApiService _instance = ApiService._internal();
   factory ApiService() => _instance;
   ApiService._internal();
 
-  // በነባሪ በምርት (Production) ወይም በሙከራ (Dev) የሚወሰን፤ በ SharedPreferences ወይም በ dart-define ሊቀየር የሚችል
+  // በነባሪ በምርት (Production) ወይም በሙከራ (Dev) የሚወሰን፤ በ dart-define ሊቀየር የሚችል
   static const String _defaultProdUrl = 'https://plan-atsede-teguhan.onrender.com/api';
   static const String _defaultDevUrl = 'http://127.0.0.1:8000/api';
 
@@ -21,6 +22,12 @@ class ApiService {
   static const String _prefTokenKey = 'atsede_auth_token';
   static const String _prefUserDataKey = 'atsede_user_data';
 
+  // ደህንነቱ የተጠበቀ የፕላትፎርም ማስቀመጫ (Platform Secure Storage)
+  static const _secureStorage = FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
+  );
+
   static String? authToken;
   static Map<String, dynamic>? currentUser;
 
@@ -29,9 +36,26 @@ class ApiService {
       final prefs = await SharedPreferences.getInstance();
       final savedBase = prefs.getString(_prefApiBaseKey);
       if (savedBase != null && savedBase.isNotEmpty) {
-        baseUrl = savedBase;
+        final parsed = Uri.tryParse(savedBase);
+        // በምርት አካባቢ (Release Mode) ያልተጠበቀ HTTP እንዳይፈቀድ መከላከል
+        if (parsed != null && (parsed.isScheme('https') || (!kReleaseMode && parsed.isScheme('http')))) {
+          baseUrl = savedBase;
+        }
       }
-      authToken = prefs.getString(_prefTokenKey);
+
+      // 1. መጀመሪያ ቶከኑን ከ Secure Storage ማንበብ
+      authToken = await _secureStorage.read(key: _prefTokenKey);
+
+      // 2. በ SharedPreferences ውስጥ የቆየ ቶከን ካለ ወደ Secure Storage ማዛወር (Migration)
+      if (authToken == null || authToken!.isEmpty) {
+        final legacyToken = prefs.getString(_prefTokenKey);
+        if (legacyToken != null && legacyToken.isNotEmpty) {
+          authToken = legacyToken;
+          await _secureStorage.write(key: _prefTokenKey, value: legacyToken);
+          await prefs.remove(_prefTokenKey); // ከ SharedPreferences ማጽዳት
+        }
+      }
+
       final savedUser = prefs.getString(_prefUserDataKey);
       if (savedUser != null) {
         currentUser = jsonDecode(savedUser);
@@ -42,9 +66,12 @@ class ApiService {
   }
 
   static Future<void> setBaseUrl(String newUrl) async {
-    baseUrl = newUrl.trim();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_prefApiBaseKey, baseUrl);
+    final parsed = Uri.tryParse(newUrl.trim());
+    if (parsed != null && (parsed.isScheme('https') || (!kReleaseMode && parsed.isScheme('http')))) {
+      baseUrl = newUrl.trim();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_prefApiBaseKey, baseUrl);
+    }
   }
 
   static Map<String, String> get _headers {
@@ -58,7 +85,7 @@ class ApiService {
     return headers;
   }
 
-  // 1. መግቢያ (Login)
+  // 1. መግቢያ (Login — የይለፍ ቃል ሳያጥር ትክክለኛውን ብቻ መላክ)
   Future<Map<String, dynamic>> login(String usernameOrDept, String password) async {
     final url = Uri.parse('$baseUrl/auth.php?action=login');
     try {
@@ -66,8 +93,9 @@ class ApiService {
         url,
         headers: _headers,
         body: jsonEncode({
+          'username': usernameOrDept.trim(),
           'department_id': usernameOrDept.trim(),
-          'password': password.trim(),
+          'password': password, // Never trim password!
         }),
       ).timeout(const Duration(seconds: 10));
 
@@ -78,8 +106,10 @@ class ApiService {
         authToken = token;
         currentUser = user;
 
+        // ቶከኑን በ Secure Storage ብቻ ማስቀመጥ (Never in SharedPreferences)
+        await _secureStorage.write(key: _prefTokenKey, value: token);
+
         final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(_prefTokenKey, token);
         await prefs.setString(_prefUserDataKey, jsonEncode(user));
 
         return {'success': true, 'user': user};
@@ -95,8 +125,8 @@ class ApiService {
     authToken = null;
     currentUser = null;
     try {
+      await _secureStorage.delete(key: _prefTokenKey);
       final prefs = await SharedPreferences.getInstance();
-      await prefs.remove(_prefTokenKey);
       await prefs.remove(_prefUserDataKey);
     } catch (_) {}
   }

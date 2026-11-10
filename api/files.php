@@ -5,10 +5,8 @@
 
 require_once __DIR__ . '/config.php';
 
-// 1. የማረጋገጫ ቶከን መፈተሽ (ከ Header ወይም ከ Query Parameter)
+// 1. የማረጋገጫ ቶከን መፈተሽ (ከ Authorization Header ብቻ — Query Parameters በደህንነት ምክንያት ተከልክለዋል)
 $auth = null;
-$token = null;
-
 $headers = getallheaders();
 $authHeader = $headers['Authorization'] ?? $headers['authorization'] ?? '';
 if (empty($authHeader) && isset($_SERVER['HTTP_AUTHORIZATION'])) {
@@ -17,22 +15,18 @@ if (empty($authHeader) && isset($_SERVER['HTTP_AUTHORIZATION'])) {
 
 if (preg_match('/Bearer\s+(.*)$/i', $authHeader, $matches)) {
     $token = trim($matches[1]);
-} elseif (!empty($_GET['token'])) {
-    $token = trim($_GET['token']);
-}
-
-if ($token) {
     $auth = verifyToken($token, $pdo);
 }
 
 if (!$auth) {
     http_response_code(401);
-    echo json_encode(['status' => 'error', 'message' => 'ያልተፈቀደ መዳረሻ! እባክዎ ትክክለኛ የፍቃድ ቶከን ያቅርቡ (Unauthorized).'], JSON_UNESCAPED_UNICODE);
+    echo json_encode(['status' => 'error', 'message' => 'ያልተፈቀደ መዳረሻ! እባክዎ በ Authorization Header ትክክለኛ የፍቃድ ቶከን ያቅርቡ (Unauthorized).'], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
 $id = trim($_GET['id'] ?? '');
 $action = $_GET['action'] ?? 'download'; // download or preview
+$type = $_GET['type'] ?? '';
 
 if (empty($id)) {
     jsonError('የፋይል ወይም የአባሪ መለያ (id) ያስፈልጋል', 400);
@@ -42,6 +36,8 @@ $filePath = null;
 $fileName = null;
 $fileType = null;
 $fileDept = null;
+
+$isChatAttachment = false;
 
 // 1. በሪፖርት አባሪዎች ውስጥ መፈለግ
 $stmt = $pdo->prepare("
@@ -58,8 +54,10 @@ if ($att) {
     $fileName = $att['file_name'];
     $fileType = $att['file_type'];
     $fileDept = $att['department_id'];
-} else {
-    // 2. በይፋዊ ሰነዶች ውስጥ መፈለግ
+}
+
+// 2. በይፋዊ ሰነዶች ውስጥ መፈለግ
+if (!$filePath) {
     $dStmt = $pdo->prepare("SELECT id, title, department_id, pdf_file_path FROM documents WHERE id = ? LIMIT 1");
     $dStmt->execute([$id]);
     $doc = $dStmt->fetch();
@@ -71,20 +69,36 @@ if ($att) {
     }
 }
 
+// 3. በቻት መልእክቶች ውስጥ መፈለግ
+if (!$filePath) {
+    $cStmt = $pdo->prepare("SELECT id, room_id, channel, department_id, attachment_path FROM chat_messages WHERE id = ? LIMIT 1");
+    $cStmt->execute([$id]);
+    $chatMsg = $cStmt->fetch();
+    if ($chatMsg && !empty($chatMsg['attachment_path'])) {
+        // የሩም አባልነት ፈቃድ በግድ መረጋገጥ አለበት
+        requireChatRoomMembership($auth, $chatMsg['channel'] ?: $chatMsg['room_id']);
+        $filePath = $chatMsg['attachment_path'];
+        $fileName = basename($filePath);
+        $fileDept = $chatMsg['department_id'];
+        $isChatAttachment = true;
+    }
+}
+
 if (!$filePath) {
     jsonError('ፋይሉ አልተገኘም ወይም ተሰርዟል', 404);
 }
 
-// 3. የክፍል ባለቤትነት ፈቃድ ማረጋገጥ (RBAC Protection)
-if (!$auth['is_super_admin'] && $fileDept !== $auth['department_id']) {
+// 4. የክፍል ባለቤትነት ፈቃድ ማረጋገጥ (RBAC Protection)
+if (!$isChatAttachment && !$auth['is_super_admin'] && $fileDept !== $auth['department_id'] && $fileDept !== 'all') {
     jsonError('የተከለከለ ክንውን! የሌላ ክፍልን የግል ፋይል የማውረድ ፈቃድ የለዎትም (Forbidden).', 403);
 }
 
-// 4. Path Traversal ጥበቃ
+// 5. ጥብቅ Path Traversal እና Directory Boundary ጥበቃ
 $baseUploadDir = realpath(__DIR__ . '/uploads');
 $targetFullPath = realpath(__DIR__ . '/../' . ltrim($filePath, '/\\'));
+
 if (!$targetFullPath || !str_starts_with($targetFullPath, $baseUploadDir) || !file_exists($targetFullPath)) {
-    // የቀጥታ የ uploads ፋይል ከሆነ መፈተሽ
+    // ቀጥታ በ uploads ስር ያለ ከሆነ መፈተሽ
     $directPath = realpath(__DIR__ . '/uploads/' . basename($filePath));
     if ($directPath && str_starts_with($directPath, $baseUploadDir) && file_exists($directPath)) {
         $targetFullPath = $directPath;
@@ -93,8 +107,18 @@ if (!$targetFullPath || !str_starts_with($targetFullPath, $baseUploadDir) || !fi
     }
 }
 
-// 5. ደህንነቱ የተጠበቀ የፋይል ማውረጃ ራስጌዎች
-$disposition = ($action === 'preview' && (str_starts_with($fileType, 'image/') || $fileType === 'application/pdf')) ? 'inline' : 'attachment';
+// የፋይሉን እውነተኛ MIME አይነት በይዘቱ መፈተሽ (MIME by content)
+if (function_exists('finfo_open')) {
+    $finfo = finfo_open(FILEINFO_MIME_TYPE);
+    $realMime = finfo_file($finfo, $targetFullPath);
+    finfo_close($finfo);
+    if ($realMime) {
+        $fileType = $realMime;
+    }
+}
+
+// 6. ደህንነቱ የተጠበቀ የፋይል ማውረጃ ራስጌዎች
+$disposition = ($action === 'preview' && (str_starts_with((string)$fileType, 'image/') || $fileType === 'application/pdf')) ? 'inline' : 'attachment';
 $cleanFileName = preg_replace('/[^a-zA-Z0-9_\-\.\x{1200}-\x{137F}]/u', '_', $fileName ?: basename($targetFullPath));
 
 header("Content-Type: " . ($fileType ?: 'application/octet-stream'));
@@ -104,6 +128,7 @@ header("X-Content-Type-Options: nosniff");
 header("Cache-Control: private, no-transform, no-store, must-revalidate");
 header("Pragma: no-cache");
 
+// ኦዲት ሎግ መያዝ (ያለ ቶከን እና ያለ ሚስጥራዊ መረጃ)
 logAudit($pdo, 'download_file', 'attachments', $id, $auth['user_id'], $fileDept);
 
 readfile($targetFullPath);

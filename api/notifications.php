@@ -12,28 +12,38 @@ $method = $_SERVER['REQUEST_METHOD'];
 if ($method === 'GET') {
     $unreadOnly = isset($_GET['unread_only']) && $_GET['unread_only'] === '1';
 
-    $sql = "SELECT * FROM notifications WHERE (department_id = ? OR department_id = 'all' OR department_id IS NULL)";
-    $params = [$auth['department_id']];
+    $sql = "
+        SELECT n.id, n.department_id, n.title, n.message, n.type, n.target_id, n.created_at,
+               IF(nr.id IS NOT NULL, 1, 0) AS is_read
+        FROM notifications n
+        LEFT JOIN notification_reads nr ON nr.notification_id = n.id AND nr.user_id = ?
+        WHERE 1=1
+    ";
+    $params = [$auth['user_id']];
 
-    // ፅ/ቤት ከሆነ ሁሉንም ማየት ይችላል
-    if ($auth['is_super_admin']) {
-        $sql = "SELECT * FROM notifications WHERE 1=1";
-        $params = [];
+    if (!$auth['is_super_admin']) {
+        $sql .= " AND (n.department_id = ? OR n.department_id = 'all' OR n.department_id IS NULL)";
+        $params[] = $auth['department_id'];
     }
 
     if ($unreadOnly) {
-        $sql .= " AND is_read = 0";
+        $sql .= " AND nr.id IS NULL";
     }
 
-    $sql .= " ORDER BY created_at DESC LIMIT 50";
+    $sql .= " ORDER BY n.created_at DESC LIMIT 50";
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $notifications = $stmt->fetchAll();
 
-    $countSql = "SELECT COUNT(*) FROM notifications WHERE is_read = 0";
-    $countParams = [];
+    $countSql = "
+        SELECT COUNT(*)
+        FROM notifications n
+        LEFT JOIN notification_reads nr ON nr.notification_id = n.id AND nr.user_id = ?
+        WHERE nr.id IS NULL
+    ";
+    $countParams = [$auth['user_id']];
     if (!$auth['is_super_admin']) {
-        $countSql .= " AND (department_id = ? OR department_id = 'all' OR department_id IS NULL)";
+        $countSql .= " AND (n.department_id = ? OR n.department_id = 'all' OR n.department_id IS NULL)";
         $countParams[] = $auth['department_id'];
     }
     $cStmt = $pdo->prepare($countSql);
@@ -53,12 +63,17 @@ if ($method === 'POST') {
     $markAll = isset($input['mark_all']) && $input['mark_all'] === true;
 
     if ($markAll) {
-        if (!$auth['is_super_admin']) {
-            $stmt = $pdo->prepare("UPDATE notifications SET is_read = 1 WHERE department_id = ? OR department_id = 'all'");
-            $stmt->execute([$auth['department_id']]);
-        } else {
-            $pdo->query("UPDATE notifications SET is_read = 1");
-        }
+        $stmt = $pdo->prepare("
+            INSERT IGNORE INTO notification_reads (notification_id, user_id, read_at)
+            SELECT id, ?, NOW()
+            FROM notifications
+            WHERE (? = 1 OR department_id = ? OR department_id = 'all' OR department_id IS NULL)
+        ");
+        $stmt->execute([
+            $auth['user_id'],
+            $auth['is_super_admin'] ? 1 : 0,
+            $auth['department_id']
+        ]);
         jsonResponse(['message' => 'ሁሉም ማሳወቂያዎች እንደተነበቡ ተደርገዋል']);
     }
 
@@ -76,8 +91,8 @@ if ($method === 'POST') {
             jsonError('የተከለከለ ክንውን! የሌላ ክፍልን ማሳወቂያ የመቀየር ፈቃድ የለዎትም (Forbidden).', 403);
         }
 
-        $stmt = $pdo->prepare("UPDATE notifications SET is_read = 1 WHERE id = ?");
-        $stmt->execute([$id]);
+        $stmt = $pdo->prepare("INSERT IGNORE INTO notification_reads (notification_id, user_id, read_at) VALUES (?, ?, NOW())");
+        $stmt->execute([$id, $auth['user_id']]);
         jsonResponse(['message' => 'ማሳወቂያው እንደተነበበ ተደርጓል', 'id' => $id]);
     }
 
