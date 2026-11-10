@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 class PlanItem {
   final String id;
   String departmentId;
@@ -179,6 +181,40 @@ class PlanItem {
           ? DateTime.tryParse(json['reportSubmittedAt'])
           : null,
       submittedBy: json['submittedBy'],
+    );
+  }
+
+  factory PlanItem.fromDbJson(Map<String, dynamic> json) {
+    Map<String, String> parsedMonths = {};
+    if (json['months_json'] != null) {
+      try {
+        // can be already parsed or string
+        final dynamic decoded = json['months_json'] is String
+            ? (json['months_json'].toString().startsWith('{') || json['months_json'].toString().startsWith('[')
+                ? jsonDecode(json['months_json'])
+                : null)
+            : json['months_json'];
+        if (decoded is Map) {
+          decoded.forEach((k, v) => parsedMonths[k.toString()] = v?.toString() ?? '');
+        }
+      } catch (_) {}
+    }
+
+    return PlanItem(
+      id: json['id']?.toString() ?? '',
+      departmentId: json['department_id']?.toString() ?? json['departmentId']?.toString() ?? '',
+      departmentName: json['department_name']?.toString() ?? json['departmentName']?.toString() ?? '',
+      subDepartment: json['sub_department']?.toString() ?? json['subDepartment']?.toString() ?? '',
+      mainTask: json['main_task']?.toString() ?? json['title']?.toString() ?? '',
+      detailTask: json['detail_task']?.toString() ?? json['description']?.toString() ?? '',
+      measurement: json['measurement']?.toString() ?? '',
+      quantity: json['quantity']?.toString() ?? '',
+      executionTime: json['execution_time']?.toString() ?? json['target_date']?.toString() ?? '',
+      budget: json['budget']?.toString() ?? '',
+      remarks: json['remarks']?.toString() ?? '',
+      months: parsedMonths,
+      progressPercent: int.tryParse(json['progress_percent']?.toString() ?? '') ?? 0,
+      reason: json['remarks']?.toString() ?? '',
     );
   }
 }

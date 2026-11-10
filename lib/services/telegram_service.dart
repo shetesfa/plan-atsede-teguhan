@@ -5,12 +5,12 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 class TelegramService {
-  static String botToken = '8787655703:AAEKUtBab8oi8rIUiwnV3n7HMDpTW63Cehk';
-  static String get baseUrl => 'https://api.telegram.org/bot$botToken';
-  static String get fileBaseUrl => 'https://api.telegram.org/file/bot$botToken';
+  static String botToken = '';
+  static String get baseUrl => botToken.isNotEmpty ? 'https://api.telegram.org/bot$botToken' : '';
+  static String get fileBaseUrl => botToken.isNotEmpty ? 'https://api.telegram.org/file/bot$botToken' : '';
   static const String cloudBackendUrl = 'https://plan-atsede-teguhan.onrender.com';
   
-  static String? savedChatId = '1537845176';
+  static String? savedChatId;
   static const String _prefChatIdKey = 'atsede_telegram_chat_id';
   static const String _prefBotTokenKey = 'atsede_telegram_bot_token';
 
@@ -29,21 +29,8 @@ class TelegramService {
   static Future<void> init() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final id = prefs.getString(_prefChatIdKey);
-      if (id != null && id.isNotEmpty && id != '-1004395752939') {
-        savedChatId = id;
-      } else {
-        savedChatId = '1537845176';
-        await prefs.setString(_prefChatIdKey, savedChatId!);
-      }
-
-      final token = prefs.getString(_prefBotTokenKey);
-      if (token != null && token.isNotEmpty && !token.contains('8754142388')) {
-        botToken = token.trim();
-      } else {
-        botToken = '8787655703:AAEKUtBab8oi8rIUiwnV3n7HMDpTW63Cehk';
-        await prefs.setString(_prefBotTokenKey, botToken);
-      }
+      savedChatId = prefs.getString(_prefChatIdKey) ?? '';
+      botToken = prefs.getString(_prefBotTokenKey) ?? '';
     } catch (_) {}
   }
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/plan_item.dart';
 import '../models/unplanned_activity.dart';
+import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/excel_importer.dart';
 import '../theme/app_theme.dart';
@@ -10,6 +11,7 @@ import 'letter_generator_screen.dart';
 import 'proposal_generator_screen.dart';
 import 'unplanned_activities_screen.dart';
 import 'document_editor_screen.dart';
+import 'office_reports_screen.dart';
 import 'plan_calendar_screen.dart';
 import 'chat_screen.dart';
 import 'login_screen.dart';
@@ -36,6 +38,20 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
 
   Future<void> _loadInitialPlans() async {
     setState(() => isLoading = true);
+    try {
+      // መጀመሪያ ከ MySQL / PHP API መጫን
+      final remoteData = await ApiService().getPlans();
+      if (remoteData.isNotEmpty) {
+        final dbPlans = remoteData.map((d) => PlanItem.fromDbJson(d)).toList();
+        setState(() {
+          plans = dbPlans;
+          isLoading = false;
+        });
+        return;
+      }
+    } catch (_) {}
+
+    // አገልጋይ ካልተገኘ ከመስመር ውጭ (Offline) ከአካባቢው ፋይል ይጭናል
     final loadedPlans = await ExcelImporterService.loadPlans();
     setState(() {
       plans = loadedPlans;
@@ -221,7 +237,7 @@ class DocumentsHubScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('ይፋዊ ሰነዶች እና ስራዎች ማዘጋጃ'),
       ),
-      body: Padding(
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -231,6 +247,40 @@ class DocumentsHubScreen extends StatelessWidget {
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.primaryMaroon),
             ),
             const SizedBox(height: 14),
+
+            // 0. የፅ/ቤት ክንውን ሪፖርቶች መገምገሚያ ካርድ
+            Card(
+              child: ListTile(
+                contentPadding: const EdgeInsets.all(16),
+                leading: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryMaroon.withAlpha(25),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.rate_review_outlined, color: AppTheme.primaryMaroon, size: 26),
+                ),
+                title: const Text(
+                  'የክንውን ሪፖርቶች መገምገሚያ (Office Review)',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                ),
+                subtitle: const Padding(
+                  padding: EdgeInsets.only(top: 4),
+                  child: Text(
+                    'በክፍሎች የቀረቡ የክንውን ሪፖርቶችን ይገምግሙ፣ ያጽድቁ፣ ወይም ማሻሻያ አስተያየት ይስጡ።',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                ),
+                trailing: const Icon(Icons.arrow_forward_ios, size: 14),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (ctx) => const OfficeReportsScreen()),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 12),
 
             // ደብዳቤ ካርድ
             Card(

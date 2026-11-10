@@ -1,15 +1,22 @@
 import 'package:flutter/material.dart';
+import 'services/api_service.dart';
 import 'services/auth_service.dart';
 import 'services/chat_service.dart';
+import 'services/notification_service.dart';
 import 'services/telegram_service.dart';
 import 'screens/main_navigation_screen.dart';
 import 'theme/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Non-blocking — ካልሰራ app አያቆምም
+  try {
+    await ApiService.init();
+  } catch (_) {}
   try {
     await AuthService.initSession();
+  } catch (_) {}
+  try {
+    await NotificationService().init();
   } catch (_) {}
   try {
     await ChatService().init();
@@ -26,7 +33,7 @@ class AtsedeTeguhanApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'አጸደ ትጉሃን ሰንበት ትምህርት ቤት',
+      title: 'ዓጸደ ትጉሃን ሰንበት ትምህርት ቤት',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       home: const MainNavigationScreen(),

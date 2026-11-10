@@ -4,7 +4,7 @@ import json
 import time
 import threading
 import requests
-from flask import Flask, jsonify, request, Response
+from flask import Flask, jsonify, request
 
 # ኮንሶል የ UTF-8 ፊደላትንና ኢሞጂዎችን በትክክል እንዲያሳይ
 if hasattr(sys.stdout, 'reconfigure'):
@@ -13,13 +13,41 @@ if hasattr(sys.stderr, 'reconfigure'):
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 # ==============================================================
+# የ .env ውቅር ማንበቢያ (Safe Environment Loader)
+# ==============================================================
+def load_env_file():
+    possible_paths = [
+        os.path.join(os.path.dirname(__file__), ".env"),
+        os.path.join(os.path.dirname(__file__), "..", "api", ".env"),
+        os.path.join(os.path.dirname(__file__), "..", ".env"),
+    ]
+    for p in possible_paths:
+        if os.path.exists(p):
+            try:
+                with open(p, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        if "=" in line:
+                            k, v = line.split("=", 1)
+                            k, v = k.strip(), v.strip().strip("\"'")
+                            if k not in os.environ:
+                                os.environ[k] = v
+            except Exception as e:
+                print(f"Error loading env from {p}: {e}")
+
+load_env_file()
+
+# ==============================================================
 # የቴሌግራም ቦት ውቅር (Bot Configuration)
 # ==============================================================
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8787655703:AAEKUtBab8oi8rIUiwnV3n7HMDpTW63Cehk")
-CHAT_ID = os.environ.get("CHAT_ID", "1537845176")
-BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
+BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("BOT_TOKEN", "")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID") or os.environ.get("CHAT_ID", "")
+PHP_API_BASE = os.environ.get("PHP_API_BASE", "http://127.0.0.1/plan%20atsedeteguhan/api")
 
-# Flask Web Server (ለ Render.com እና ለሌሎች ነፃ ሆስቲንጎች 24/7 ጤናማ መሆኑን ማሳወቂያ)
+BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}" if BOT_TOKEN else ""
+
 app = Flask(__name__)
 
 @app.after_request
@@ -29,36 +57,45 @@ def add_cors_headers(response):
     response.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
     return response
 
-PLANS_CACHE = []
+def get_plans_from_database(dept=None):
+    """እቅዶችን በቀጥታ ከ MySQL / PHP API በማምጣት አንድ የእውነት ምንጭ (Single Source of Truth) መኖሩን ያረጋግጣል"""
+    try:
+        url = f"{PHP_API_BASE}/plans.php"
+        params = {}
+        if dept:
+            params["dept"] = dept
+        res = requests.get(url, params=params, timeout=5)
+        if res.status_code == 200:
+            data = res.json()
+            if data.get("status") == "success":
+                return data.get("data", [])
+    except Exception as e:
+        print(f"Notice: PHP API unavailable, using local JSON fallback: {e}")
 
-def load_plans():
-    """የእቅድ ዳታዎችን ከ default_plans.json ፋይል ይጭናል"""
-    global PLANS_CACHE
-    possible_paths = [
-        os.path.join(os.path.dirname(__file__), "..", "assets", "default_plans.json"),
-        os.path.join(os.path.dirname(__file__), "default_plans.json"),
-        "assets/default_plans.json",
-    ]
-    for p in possible_paths:
-        if os.path.exists(p):
-            try:
-                with open(p, "r", encoding="utf-8") as f:
-                    PLANS_CACHE = json.load(f)
-                    print(f"✅ {len(PLANS_CACHE)} እቅዶች በተሳካ ሁኔታ ተጭነዋል ከ {p}")
-                    return
-            except Exception as e:
-                print(f"Error reading plans: {e}")
-    print("⚠️ default_plans.json አልተገኘም ወይም ባዶ ነው")
+    # አገልጋዩ በማይገኝበት ጊዜ የሚረዳ አማራጭ (Fallback)
+    local_path = os.path.join(os.path.dirname(__file__), "..", "assets", "default_plans.json")
+    if os.path.exists(local_path):
+        try:
+            with open(local_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if dept:
+                    return [p for p in data if p.get("department") == dept or p.get("departmentId") == dept]
+                return data
+        except Exception:
+            pass
+    return []
 
 @app.route("/", methods=["GET"])
 def home():
+    has_token = bool(BOT_TOKEN)
+    token_preview = (BOT_TOKEN[:10] + "...") if has_token else "NOT_CONFIGURED"
     return jsonify({
         "status": "online",
-        "service": "Atsede Teguhan Telegram Bot & API Server",
-        "bot_active": True,
-        "bot_token_prefix": BOT_TOKEN[:10] + "...",
-        "plans_count": len(PLANS_CACHE),
-        "chat_id": CHAT_ID
+        "service": "Atsede Teguhan Telegram Bot & Background Scheduler",
+        "bot_configured": has_token,
+        "bot_token_prefix": token_preview,
+        "chat_id_configured": bool(CHAT_ID),
+        "timezone": "Africa/Addis_Ababa"
     })
 
 @app.route("/health", methods=["GET"])
@@ -66,28 +103,27 @@ def health():
     return jsonify({"status": "ok", "time": time.time()})
 
 @app.route("/api/plans", methods=["GET"])
-def get_plans():
-    """እቅዶችን በ API ያቀርባል"""
+def api_get_plans():
     dept = request.args.get("dept")
-    if dept:
-        filtered = [p for p in PLANS_CACHE if p.get("department") == dept or p.get("departmentId") == dept]
-        return jsonify({"status": "success", "count": len(filtered), "data": filtered})
-    return jsonify({"status": "success", "count": len(PLANS_CACHE), "data": PLANS_CACHE})
+    plans = get_plans_from_database(dept)
+    return jsonify({"status": "success", "count": len(plans), "data": plans})
 
 # ==============================================================
-# Telegram Proxy API (ለ Flutter Web & Mobile ግንኙነት አስተማማኝ ድልድይ)
+# Telegram Proxy API (ደህንነቱ የተጠበቀ ድልድይ)
 # ==============================================================
 @app.route("/api/send_notice", methods=["POST", "OPTIONS"])
 def send_notice():
-    """ከመተግበሪያው የሚመጣ ማሳወቂያ ወይም ሪፖርት ወደ ቴሌግራም ይልካል"""
     if request.method == "OPTIONS":
         return "", 200
+    if not BOT_TOKEN:
+        return jsonify({"error": "የቴሌግራም ቦት ቶከን አልተዋቀረም", "ok": False}), 500
+
     body = request.get_json(silent=True) or {}
     message = body.get("message", "")
     target_chat = body.get("chat_id") or CHAT_ID
     if not message:
         return jsonify({"error": "መልእክት አልተሰጠም"}), 400
-    
+
     try:
         res = requests.post(f"{BASE_URL}/sendMessage", json={
             "chat_id": target_chat,
@@ -107,7 +143,11 @@ def proxy_send_message():
     text = body.get("text", "")
     parse_mode = body.get("parse_mode", "HTML")
     custom_token = body.get("bot_token")
-    url = f"https://api.telegram.org/bot{custom_token or BOT_TOKEN}/sendMessage"
+    token_to_use = custom_token or BOT_TOKEN
+    if not token_to_use:
+        return jsonify({"ok": False, "description": "No bot token provided"}), 400
+
+    url = f"https://api.telegram.org/bot{token_to_use}/sendMessage"
     try:
         res = requests.post(url, json={
             "chat_id": target_chat,
@@ -126,12 +166,12 @@ def proxy_send_document():
         chat_id = request.form.get("chat_id") or CHAT_ID
         caption = request.form.get("caption", "")
         custom_token = request.form.get("bot_token")
-        url = f"https://api.telegram.org/bot{custom_token or BOT_TOKEN}/sendDocument"
-        
-        files = {}
-        for key, f in request.files.items():
-            files[key] = (f.filename, f.stream, f.mimetype)
-            
+        token_to_use = custom_token or BOT_TOKEN
+        if not token_to_use:
+            return jsonify({"ok": False, "description": "No bot token provided"}), 400
+
+        url = f"https://api.telegram.org/bot{token_to_use}/sendDocument"
+        files = {key: (f.filename, f.stream, f.mimetype) for key, f in request.files.items()}
         data = {"chat_id": chat_id}
         if caption:
             data["caption"] = caption
@@ -150,12 +190,12 @@ def proxy_send_photo():
         chat_id = request.form.get("chat_id") or CHAT_ID
         caption = request.form.get("caption", "")
         custom_token = request.form.get("bot_token")
-        url = f"https://api.telegram.org/bot{custom_token or BOT_TOKEN}/sendPhoto"
-        
-        files = {}
-        for key, f in request.files.items():
-            files[key] = (f.filename, f.stream, f.mimetype)
-            
+        token_to_use = custom_token or BOT_TOKEN
+        if not token_to_use:
+            return jsonify({"ok": False, "description": "No bot token provided"}), 400
+
+        url = f"https://api.telegram.org/bot{token_to_use}/sendPhoto"
+        files = {key: (f.filename, f.stream, f.mimetype) for key, f in request.files.items()}
         data = {"chat_id": chat_id}
         if caption:
             data["caption"] = caption
@@ -166,39 +206,12 @@ def proxy_send_photo():
     except Exception as e:
         return jsonify({"ok": False, "description": str(e)}), 500
 
-@app.route("/api/telegram/getUpdates", methods=["GET", "OPTIONS"])
-def proxy_get_updates():
-    if request.method == "OPTIONS":
-        return "", 200
-    offset = request.args.get("offset")
-    timeout = request.args.get("timeout", "5")
-    custom_token = request.args.get("bot_token")
-    url = f"https://api.telegram.org/bot{custom_token or BOT_TOKEN}/getUpdates"
-    params = {"timeout": timeout}
-    if offset:
-        params["offset"] = offset
-    try:
-        res = requests.get(url, params=params, timeout=int(timeout) + 5)
-        return jsonify(res.json()), res.status_code
-    except Exception as e:
-        return jsonify({"ok": False, "description": str(e)}), 500
-
-@app.route("/api/telegram/getMe", methods=["GET", "OPTIONS"])
-def proxy_get_me():
-    if request.method == "OPTIONS":
-        return "", 200
-    custom_token = request.args.get("bot_token")
-    url = f"https://api.telegram.org/bot{custom_token or BOT_TOKEN}/getMe"
-    try:
-        res = requests.get(url, timeout=10)
-        return jsonify(res.json()), res.status_code
-    except Exception as e:
-        return jsonify({"ok": False, "description": str(e)}), 500
-
 # ==============================================================
-# የቴሌግራም ቦት አዳማጭ ሉፕ (Telegram Bot Polling Loop)
+# የቴሌግራም ቦት አዳማጭ ሉፕ (Telegram Polling Loop)
 # ==============================================================
 def send_telegram_reply(chat_id, text, reply_to_message_id=None):
+    if not BOT_TOKEN:
+        return
     try:
         payload = {
             "chat_id": chat_id,
@@ -215,7 +228,7 @@ def handle_update(update):
     msg = update.get("message") or update.get("channel_post")
     if not msg:
         return
-    
+
     chat_id = msg.get("chat", {}).get("id")
     text = (msg.get("text") or "").strip()
     msg_id = msg.get("message_id")
@@ -224,7 +237,6 @@ def handle_update(update):
     if not text:
         return
 
-    # ትእዛዞች (Commands)
     if text.startswith("/start") or text.startswith("/help"):
         welcome = (
             f"ሰላም <b>{user_name}</b> እንኳን ወደ <b>አጸደ ትጉሃን ሰንበት ትምህርት ቤት</b> የእቅድና ሪፖርት ቦት በደህና መጡ! 🕊️\n\n"
@@ -248,47 +260,41 @@ def handle_update(update):
             "7. በጀት እና ንብረት አስተዳደር ክፍል\n"
             "8. ሰው ሀብት አስተዳደር ክፍል\n"
             "9. ቁጥጥር ክፍል\n"
-            "10. ጽ/ቤት\n\n"
-            "<i>የአንድን ክፍል እቅድ ለማየት ለምሳሌ፦ /plan_ትምህርት ወይም /plan_ልማት ብለው ይጻፉ።</i>"
+            "10. ጽ/ቤት\n"
         )
         send_telegram_reply(chat_id, depts_text, msg_id)
 
     elif text.startswith("/plans") or text.startswith("/plan"):
-        total = len(PLANS_CACHE)
+        plans = get_plans_from_database()
+        total = len(plans)
         if total == 0:
             send_telegram_reply(chat_id, "⚠️ በአሁኑ ወቅት የተመዘገበ እቅድ አልተገኘም።", msg_id)
             return
 
-        # ማጠቃለያ በክፍሎች
         summary = {}
-        for p in PLANS_CACHE:
-            dept = p.get("department", "ሌላ")
+        for p in plans:
+            dept = p.get("department_name") or p.get("department", "ሌላ")
             summary[dept] = summary.get(dept, 0) + 1
-        
+
         lines = [f"📊 <b>የ2019 ዓ.ም የእቅዶች ማጠቃለያ (ጠቅላላ፦ {total})፦</b>\n"]
         for dept, cnt in summary.items():
             lines.append(f"• <b>{dept}</b>፦ {cnt} እቅዶች")
         lines.append("\n<i>ዝርዝር እቅዶችን እና ሪፖርቶችን በሞባይል መተግበሪያው ውስጥ መከታተል ይችላሉ!</i>")
         send_telegram_reply(chat_id, "\n".join(lines), msg_id)
 
-    elif text.startswith("/recent") or text.startswith("/today"):
-        lines = ["📅 <b>የቅርብ ጊዜ እና የቀን እቅዶች ናሙና፦</b>\n"]
-        dated = [p for p in PLANS_CACHE if p.get("targetDate") or p.get("month")]
-        for p in dated[:6]:
-            d = p.get("targetDate") or p.get("month") or "-"
-            lines.append(f"▫️ <b>[{d}]</b> {p.get('title', 'እቅድ')} (<i>{p.get('department', '')}</i>)")
-        send_telegram_reply(chat_id, "\n".join(lines), msg_id)
-
     elif text.startswith("/info"):
         info_text = (
             "ℹ️ <b>አጸደ ትጉሃን የዕቅድና ሪፖርት አስተዳደር ስርዓት</b>\n\n"
             "ይህ ቦት ከመተግበሪያው ጋር በቀጥታ የተገናኘ ሲሆን፣ ክፍሎች ሪፖርት ሲያስገቡና እቅድ ሲያስተላልፉ በቅጽበት ማሳወቂያዎችን ያደርሳል።\n\n"
-            f"📍 ግሩፕ/ተጠቃሚ ID: <code>{CHAT_ID}</code>\n"
             "🟢 ሁኔታ፦ መስመር ላይ (Online 24/7)"
         )
         send_telegram_reply(chat_id, info_text, msg_id)
 
 def bot_polling_loop():
+    if not BOT_TOKEN:
+        print("⚠️ የቴሌግራም ቦት ቶከን አልተዋቀረም፤ ፖሊንግ አይሰራም።")
+        return
+
     print("🚀 የቴሌግራም ቦት ማዳመጥ ጀመረ (Bot Poller Started)...")
     last_update_id = None
     while True:
@@ -296,7 +302,7 @@ def bot_polling_loop():
             params = {"timeout": 20, "allowed_updates": ["message", "channel_post"]}
             if last_update_id:
                 params["offset"] = last_update_id + 1
-            
+
             res = requests.get(f"{BASE_URL}/getUpdates", params=params, timeout=30)
             if res.status_code == 200:
                 data = res.json()
@@ -308,16 +314,14 @@ def bot_polling_loop():
                         except Exception as ex:
                             print(f"Error handling update: {ex}")
         except Exception as e:
-            # print(f"Polling loop notice: {e}")
             time.sleep(3)
         time.sleep(0.5)
 
 if __name__ == "__main__":
-    load_plans()
-    # የቴሌግራም ቦትን በጀርባ ትሬድ ማስጀመር
-    poller_thread = threading.Thread(target=bot_polling_loop, daemon=True)
-    poller_thread.start()
-    
+    if BOT_TOKEN:
+        poller_thread = threading.Thread(target=bot_polling_loop, daemon=True)
+        poller_thread.start()
+
     port = int(os.environ.get("PORT", 8080))
     print(f"🌍 የ Flask ዌብ አገልጋይ በፖርት {port} ላይ እየሰራ ነው...")
     app.run(host="0.0.0.0", port=port)

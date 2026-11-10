@@ -15,6 +15,9 @@ class AppTheme {
   static const Color textSecondary = Color(0xFF4A5568);
   static const Color textMuted = Color(0xFF718096);
   static const Color borderLight = Color(0xFFE2E8F0);
+  static const Color backgroundLight = Color(0xFFF7F9FC);
+  static const Color goldAccent = Color(0xFFD4AF37);
+
 
   // የሁኔታ ቀለሞች (Status Accents)
   static const Color greenSuccess = Color(0xFF10B981);

@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'api_service.dart';
 
 class ChatMessage {
   final String id;
@@ -47,12 +50,40 @@ class ChatMessage {
         imagePath: imagePath,
         status: status ?? this.status,
       );
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'channel': channel,
+        'sender_name': senderName,
+        'sender_role': senderRole,
+        'department_id': senderDept,
+        'message': message,
+        'time': time,
+        'is_official_notice': isOfficialNotice ? 1 : 0,
+        'attachment_path': attachmentName,
+      };
+
+  factory ChatMessage.fromJson(Map<String, dynamic> json, String currentUserName) {
+    final sender = json['sender_name'] ?? json['senderName'] ?? 'አባል';
+    final isMine = sender == currentUserName;
+    return ChatMessage(
+      id: json['id'] ?? ('msg_' + DateTime.now().millisecondsSinceEpoch.toString()),
+      channel: json['channel'] ?? json['room_id'] ?? 'ይፋዊ መመሪያዎች',
+      senderName: sender,
+      senderRole: json['sender_role'] ?? json['senderRole'] ?? 'ተወካይ',
+      senderDept: json['department_id'] ?? json['senderDept'] ?? 'admin',
+      message: json['message'] ?? '',
+      time: json['time'] ?? (json['created_at'] != null ? json['created_at'].toString().substring(11, 16) : '00:00'),
+      isMe: isMine,
+      isOfficialNotice: json['is_official_notice'] == 1 || json['isOfficialNotice'] == true,
+      attachmentName: json['attachment_path'] ?? json['attachmentName'],
+      status: MessageStatus.delivered,
+    );
+  }
 }
 
 enum MessageStatus { sending, sent, delivered }
 
-/// Pure in-memory chat service — ያለ ዲስክ ወይም IndexedDB ይሰራል።
-/// StreamController ይጠቀማል → ቀጥተኛ real-time ለሁሉም listeners።
 class ChatService extends ChangeNotifier {
   static final ChatService _instance = ChatService._internal();
   factory ChatService() => _instance;
@@ -60,7 +91,8 @@ class ChatService extends ChangeNotifier {
 
   final List<ChatMessage> _allMessages = [];
   final _streamController = StreamController<List<ChatMessage>>.broadcast();
-  bool _seeded = false;
+  Timer? _pollingTimer;
+  String _activeChannel = 'ይፋዊ መመሪያዎች';
 
   Stream<List<ChatMessage>> get messagesStream => _streamController.stream;
 
@@ -68,12 +100,68 @@ class ChatService extends ChangeNotifier {
       _allMessages.where((m) => m.channel == channel).toList();
 
   Future<void> init() async {
-    if (_seeded) {
-      notifyListeners();
-      return;
+    _loadCachedMessages();
+    _startPolling();
+  }
+
+  void setActiveChannel(String channel) {
+    _activeChannel = channel;
+    refreshMessages(channel);
+  }
+
+  Future<void> refreshMessages(String channel) async {
+    try {
+      final remote = await ApiService().getChatMessages(channel);
+      if (remote.isNotEmpty) {
+        final currentUserName = ApiService.currentUser?['full_name'] ?? '';
+        for (var raw in remote) {
+          final msg = ChatMessage.fromJson(raw, currentUserName);
+          final exists = _allMessages.any((m) => m.id == msg.id);
+          if (!exists) {
+            _allMessages.add(msg);
+          }
+        }
+        _saveToCache();
+        _emit();
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
+
+  void _startPolling() {
+    _pollingTimer?.cancel();
+    _pollingTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      refreshMessages(_activeChannel);
+    });
+  }
+
+  Future<void> _loadCachedMessages() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getString('atsede_chat_cache');
+      if (saved != null) {
+        final list = jsonDecode(saved) as List;
+        final currentUserName = ApiService.currentUser?['full_name'] ?? '';
+        _allMessages.clear();
+        for (var raw in list) {
+          _allMessages.add(ChatMessage.fromJson(raw, currentUserName));
+        }
+        _emit();
+        notifyListeners();
+      } else {
+        _seedDefaultMessages();
+      }
+    } catch (_) {
+      _seedDefaultMessages();
     }
-    _seeded = true;
-    _seedDefaultMessages();
+  }
+
+  Future<void> _saveToCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final list = _allMessages.map((m) => m.toJson()).toList();
+      await prefs.setString('atsede_chat_cache', jsonEncode(list));
+    } catch (_) {}
   }
 
   void _seedDefaultMessages() {
@@ -85,8 +173,7 @@ class ChatService extends ChangeNotifier {
         senderName: 'ዲ/ን ቴዎድሮስ',
         senderRole: 'የፅ/ቤት ዋና ጸሐፊ',
         senderDept: 'ጽ/ቤት',
-        message:
-            'በስመ አብ ወወልድ ወመንፈስ ቅዱስ አሐዱ አምላክ አሜን። የተከበራችሁ የ10ሩም ክፍሎች ኃላፊዎች፡ የ2019 ዓ.ም የ1ኛ ሩብ ዓመት እቅድ ክንውን ሪፖርታችሁን እስከ ጥቅምት 30 እንድታጠናቅቁ በጥብቅ እናሳስባለን።',
+        message: 'በስመ አብ ወወልድ ወመንፈስ ቅዱስ አሐዱ አምላክ አሜን። የተከበራችሁ የ10ሩም ክፍሎች ኃላፊዎች፡ የ2019 ዓ.ም የ1ኛ ሩብ ዓመት እቅድ ክንውን ሪፖርታችሁን እንድታጠናቅቁ በጥብቅ እናሳስባለን።',
         time: '09:30',
         dateLabel: 'ዛሬ',
         isMe: false,
@@ -112,19 +199,7 @@ class ChatService extends ChangeNotifier {
         senderName: 'ዲ/ን ቴዎድሮስ',
         senderRole: 'የፅ/ቤት ዋና ጸሐፊ',
         senderDept: 'ጽ/ቤት',
-        message: 'ሰላም! ይህ ቀጥታ መስመር ሚስጥራዊ ይዘቶችን ለሚልኩ ነው። ፈርሙ ወዴት ደረሳችሁ?',
-        time: now,
-        dateLabel: 'ዛሬ',
-        isMe: false,
-        status: MessageStatus.delivered,
-      ),
-      ChatMessage(
-        id: 'seed_004',
-        channel: 'የሰነዶች እና እቅድ ማጋሪያ',
-        senderName: 'ፍቃዱ ኃይሌ',
-        senderRole: 'የልማት ኃላፊ',
-        senderDept: 'ልማት ክፍል',
-        message: 'አዲሱ ፕሮፖዛል ተዘጋጅቷል። ለሁሉም ክፍሎች እንዲያዩ ይህ ቻናል ተጠቀሙ።',
+        message: 'ሰላም! ይህ ቀጥታ መስመር ሚስጥራዊ ይዘቶችን ለሚልኩ ነው።',
         time: now,
         dateLabel: 'ዛሬ',
         isMe: false,
@@ -148,7 +223,7 @@ class ChatService extends ChangeNotifier {
     final id = 'msg_${DateTime.now().millisecondsSinceEpoch}';
     final now = _timeNow();
 
-    final msg = ChatMessage(
+    final localMsg = ChatMessage(
       id: id,
       channel: channel,
       senderName: senderName,
@@ -164,17 +239,41 @@ class ChatService extends ChangeNotifier {
       status: MessageStatus.sending,
     );
 
-    _allMessages.add(msg);
+    _allMessages.add(localMsg);
     _emit();
     notifyListeners();
+    _saveToCache();
 
-    // Simulate delivery confirmation
-    await Future.delayed(const Duration(milliseconds: 300));
-    final idx = _allMessages.indexWhere((m) => m.id == id);
-    if (idx != -1) {
-      _allMessages[idx] = msg.copyWith(status: MessageStatus.delivered);
-      _emit();
-      notifyListeners();
+    // ወደ ባክኤንድ መላክ
+    try {
+      final res = await ApiService().sendChatMessage({
+        'id': id,
+        'channel': channel,
+        'room_id': channel,
+        'department_id': senderDept,
+        'sender_name': senderName,
+        'sender_role': senderRole,
+        'message': message,
+        'is_official_notice': isOfficialNotice ? 1 : 0,
+        'attachment_path': attachmentName,
+      });
+
+      final idx = _allMessages.indexWhere((m) => m.id == id);
+      if (idx != -1) {
+        _allMessages[idx] = _allMessages[idx].copyWith(
+          status: res['success'] == true ? MessageStatus.delivered : MessageStatus.sent,
+        );
+        _emit();
+        notifyListeners();
+        _saveToCache();
+      }
+    } catch (_) {
+      final idx = _allMessages.indexWhere((m) => m.id == id);
+      if (idx != -1) {
+        _allMessages[idx] = _allMessages[idx].copyWith(status: MessageStatus.sent);
+        _emit();
+        notifyListeners();
+      }
     }
   }
 
@@ -184,13 +283,16 @@ class ChatService extends ChangeNotifier {
     }
   }
 
-  String _timeNow() {
-    final n = DateTime.now();
-    return '${n.hour.toString().padLeft(2, '0')}:${n.minute.toString().padLeft(2, '0')}';
+  static String _timeNow() {
+    final now = DateTime.now();
+    final h = now.hour.toString().padLeft(2, '0');
+    final m = now.minute.toString().padLeft(2, '0');
+    return '$h:$m';
   }
 
   @override
   void dispose() {
+    _pollingTimer?.cancel();
     _streamController.close();
     super.dispose();
   }
