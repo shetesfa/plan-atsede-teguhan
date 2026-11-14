@@ -27,7 +27,8 @@ class _UnplannedActivitiesScreenState extends State<UnplannedActivitiesScreen> {
     String deptName = currentDept?.name ?? 'ልማትና በጎ አድራጎት ክፍል';
     final titleCtrl = TextEditingController();
     final descCtrl = TextEditingController();
-    final dateCtrl = TextEditingController(text: '15/02/2019 ዓ.ም');
+    // Audit M8: date field starts EMPTY (was pre-filled with a sample date).
+    final dateCtrl = TextEditingController();
     final budgetCtrl = TextEditingController(text: '0');
     String? pickedPhotoPath;
 
@@ -80,11 +81,11 @@ class _UnplannedActivitiesScreenState extends State<UnplannedActivitiesScreen> {
                       const SizedBox(height: 10),
                     ],
 
-                    _buildField('የስራው ርዕስ (ግዴታ)፡', titleCtrl),
+                    _buildField('የስራው ርዕስ (ግዴታ)፡', titleCtrl, hint: 'የስራው ርዕስ እዚህ ያስገቡ'),
                     const SizedBox(height: 10),
-                    _buildField('የክንውን ቀን፡', dateCtrl),
+                    _buildField('የክንውን ቀን፡', dateCtrl, hint: 'ቀን/ወር/ዓመት ዓ.ም'),
                     const SizedBox(height: 10),
-                    _buildField('የስራው ዝርዝር መግለጫ፡', descCtrl, maxLines: 3),
+                    _buildField('የስራው ዝርዝር መግለጫ፡', descCtrl, maxLines: 3, hint: 'ዝርዝር መግለጫ እዚህ ያስገቡ'),
                     const SizedBox(height: 10),
                     _buildField('የወጣው ወጪ / በጀት (ብር)፡', budgetCtrl),
                     const SizedBox(height: 12),
@@ -161,7 +162,7 @@ class _UnplannedActivitiesScreenState extends State<UnplannedActivitiesScreen> {
     );
   }
 
-  Widget _buildField(String label, TextEditingController ctrl, {int maxLines = 1}) {
+  Widget _buildField(String label, TextEditingController ctrl, {int maxLines = 1, String? hint}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -171,9 +172,10 @@ class _UnplannedActivitiesScreenState extends State<UnplannedActivitiesScreen> {
           controller: ctrl,
           maxLines: maxLines,
           style: const TextStyle(fontSize: 12),
-          decoration: const InputDecoration(
-            border: OutlineInputBorder(),
-            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: InputDecoration(
+            hintText: hint,
+            border: const OutlineInputBorder(),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           ),
         ),
       ],
