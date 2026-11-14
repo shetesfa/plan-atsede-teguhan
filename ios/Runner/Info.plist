@@ -24,6 +24,12 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<!-- Audit M2: image_picker needs these on iOS or picking a photo
+	     crashes/closes the app. Amharic text: photo evidence for reports. -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>ለሪፖርት ማስረጃ ፎቶ ለማያያዝ ከፎቶ ቤተ-መጽሐፍትዎ ፎቶ መምረጥ ያስፈልጋል።</string>
+	<key>NSCameraUsageDescription</key>
+	<string>ለሪፖርት ማስረጃ ፎቶ ለማንሳት ካሜራ መጠቀም ያስፈልጋል።</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>
