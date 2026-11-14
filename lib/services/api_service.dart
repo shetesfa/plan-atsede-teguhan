@@ -14,18 +14,31 @@ class ApiService {
   static const String _defaultProdUrl = 'https://plan-atsede-teguhan.onrender.com/api';
   static const String _defaultDevUrl = 'http://127.0.0.1:8000/api';
 
-  static String baseUrl = const String.fromEnvironment(
-    'API_BASE_URL',
-    defaultValue: kReleaseMode ? _defaultProdUrl : _defaultDevUrl,
-  );
+  static String? _customBaseUrl;
+
+  /// ተለዋዋጭ እና አስተማማኝ የአገልጋይ አድራሻ (Effective Base URL)
+  static String get baseUrl {
+    // በድር (Web) ላይ በ localhost ወይም 127.0.0.1 ሲከፈት ሁልጊዜ ወደ አካባቢው አገልጋይ ማመልከት
+    if (kIsWeb) {
+      final host = Uri.base.host;
+      if (host.isEmpty || host == 'localhost' || host == '127.0.0.1') {
+        return _defaultDevUrl;
+      }
+    }
+    return _customBaseUrl ?? (kReleaseMode ? _defaultProdUrl : _defaultDevUrl);
+  }
+
+  static set baseUrl(String value) {
+    _customBaseUrl = value;
+  }
+
   static const String _prefApiBaseKey = 'atsede_api_base_url';
   static const String _prefTokenKey = 'atsede_auth_token';
   static const String _prefUserDataKey = 'atsede_user_data';
 
   // ደህንነቱ የተጠበቀ የፕላትፎርም ማስቀመጫ (Platform Secure Storage)
   static const _secureStorage = FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
-    iOptions: IOSOptions(accessibility: KeychainAccessibility.first_unlock),
+    aOptions: AndroidOptions(),
   );
 
   static String? authToken;
@@ -34,12 +47,15 @@ class ApiService {
   static Future<void> init() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final savedBase = prefs.getString(_prefApiBaseKey);
-      if (savedBase != null && savedBase.isNotEmpty) {
-        final parsed = Uri.tryParse(savedBase);
-        // በምርት አካባቢ (Release Mode) ያልተጠበቀ HTTP እንዳይፈቀድ መከላከል
-        if (parsed != null && (parsed.isScheme('https') || (!kReleaseMode && parsed.isScheme('http')))) {
-          baseUrl = savedBase;
+      
+      // በአካባቢው Web ላይ ካልሆነ ብቻ የተቀመጠውን base URL ማንበብ
+      if (!kIsWeb || (Uri.base.host != 'localhost' && Uri.base.host != '127.0.0.1')) {
+        final savedBase = prefs.getString(_prefApiBaseKey);
+        if (savedBase != null && savedBase.isNotEmpty) {
+          final parsed = Uri.tryParse(savedBase);
+          if (parsed != null && (parsed.isScheme('https') || (!kReleaseMode && parsed.isScheme('http')))) {
+            _customBaseUrl = savedBase;
+          }
         }
       }
 
@@ -129,6 +145,23 @@ class ApiService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_prefUserDataKey);
     } catch (_) {}
+  }
+
+  /// የአሁኑን የተጠቃሚ መረጃ ከአገልጋዩ ማረጋገጥ (Get Live Current User Profile)
+  Future<Map<String, dynamic>?> getCurrentUser() async {
+    try {
+      final uri = Uri.parse('$baseUrl/auth.php?action=me');
+      final res = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (data['user'] != null && data['user'] is Map) {
+          final user = Map<String, dynamic>.from(data['user']);
+          currentUser = user;
+          return user;
+        }
+      }
+    } catch (_) {}
+    return null;
   }
 
   // 2. እቅዶችን ማምጣት (Get Plans)

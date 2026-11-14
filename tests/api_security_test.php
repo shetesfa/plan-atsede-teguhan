@@ -13,9 +13,9 @@
 
 require_once __DIR__ . '/../api/config.php';
 
-// 1. የምርት ጥበቃ (Production Guard)
-if (($appEnv ?? '') === 'production' && empty(getenv('ALLOW_TESTS_ON_PROD'))) {
-    die("FATAL: የሙከራ ስብስብ በምርት (Production) አካባቢ ላይ እንዳይሮጥ በደህንነት ምክንያት ታግዷል!\n");
+// 1. ጥብቅ የምርት ጥበቃ (Strict Production Guard - No Bypass Allowed)
+if (($appEnv ?? '') === 'production') {
+    die("FATAL: የሙከራ ስብስብ በምርት (Production) አካባቢ ላይ እንዳይሮጥ በደህንነት ምክንያት በጥብቅ ታግዷል!\n");
 }
 
 class IsolatedMasterSecurityTest {
@@ -72,13 +72,12 @@ class IsolatedMasterSecurityTest {
         echo "🔧 [Setup] ጊዜያዊ የሙከራ መለያዎችን እና ዳታዎችን ማዘጋጀት...\n";
         $hash = password_hash($this->testPassword, PASSWORD_BCRYPT, ['cost' => 10]);
 
-        // 1. የሙከራ ክፍሎች መኖራቸውን ማረጋገጥ
+        // 1. የሙከራ ክፍሎች መኖራቸውን ማረጋገጥ (ነባር ክፍሎችን ሳይቀይሩ በደህና መመዝገብ)
         $this->pdo->exec("
-            INSERT INTO departments (id, name, short_name, is_super_admin) VALUES
+            INSERT IGNORE INTO departments (id, name, short_name, is_super_admin) VALUES
             ('education', 'የትምህርት እና ስልጠና ክፍል', 'ትምህርት', 0),
             ('mezmur', 'የመዝሙር እና ስነጥበብ ክፍል', 'መዝሙር', 0),
-            ('admin', 'የሰንበት ት/ቤት ፅ/ቤት', 'ፅ/ቤት', 1)
-            ON DUPLICATE KEY UPDATE name = VALUES(name);
+            ('admin', 'የሰንበት ት/ቤት ፅ/ቤት', 'ፅ/ቤት', 1);
         ");
 
         // 2. ጊዜያዊ የሙከራ ተጠቃሚዎችን መፍጠር
@@ -582,6 +581,35 @@ class IsolatedMasterSecurityTest {
         ];
         $resOfficeChat = $this->request('POST', '/api/sync.php', $syncOfficeChat, $this->eduToken);
         $this->record("በ Sync ወደ ፅ/ቤት ሩም (office) መልእክት ሲላክ መከልከሉ (403)", $resOfficeChat['status'] === 403, "403 Forbidden", (string)$resOfficeChat['status']);
+
+        // በመዝሙር ክፍል የተላከ የቻት መልእክት በዳታቤዝ መመዝገብ
+        $mezMsgId = "msg_{$this->runId}_mez_orig";
+        $this->pdo->prepare("
+            INSERT INTO chat_messages (id, room_id, channel, department_id, sender_name, message)
+            VALUES (?, 'ጠቅላላ ውይይት', 'ጠቅላላ ውይይት', 'mezmur', 'የሙከራ መዝሙር ኃላፊ', 'የመዝሙር ኦሪጅናል መልእክት')
+        ")->execute([$mezMsgId]);
+
+        // የትምህርት ክፍል ተጠቃሚ የመዝሙር ክፍልን የቻት መልእክት በ Sync ሊቀይር ሲሞክር መከልከል (Chat IDOR 403)
+        $syncChatIdor = [
+            'device_id' => 'device_edu',
+            'changes' => [
+                [
+                    'sync_id' => "sync_{$this->runId}_chat_idor",
+                    'entity_type' => 'chat',
+                    'action' => 'update',
+                    'payload' => [
+                        'id' => $mezMsgId,
+                        'message' => 'በትምህርት ክፍል የተበረዘ የመዝሙር መልእክት'
+                    ]
+                ]
+            ]
+        ];
+        $resChatIdor = $this->request('POST', '/api/sync.php', $syncChatIdor, $this->eduToken);
+        $this->record("በ Sync የሌላ ክፍልን የቻት መልእክት ማሻሻል ሲከለከል (403)", $resChatIdor['status'] === 403, "403 Forbidden", (string)$resChatIdor['status']);
+
+        // በቀጥታ በ PUT /api/chat.php የሌላ ክፍልን መልእክት ማሻሻል ሲከለከል (403)
+        $resDirectChatEdit = $this->request('PUT', "/api/chat.php?id=$mezMsgId", ['message' => 'ቀጥታ የተበረዘ'], $this->eduToken);
+        $this->record("በ PUT የሌላ ሰውን/ክፍልን መልእክት ማሻሻል ሲከለከል (403)", $resDirectChatEdit['status'] === 403, "403 Forbidden", (string)$resDirectChatEdit['status']);
     }
 
     // --- 17. ሎግአውት እና ቶከን ማሰናከል ---

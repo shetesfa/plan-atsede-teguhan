@@ -93,14 +93,23 @@ if (!$isChatAttachment && !$auth['is_super_admin'] && $fileDept !== $auth['depar
     jsonError('የተከለከለ ክንውን! የሌላ ክፍልን የግል ፋይል የማውረድ ፈቃድ የለዎትም (Forbidden).', 403);
 }
 
-// 5. ጥብቅ Path Traversal እና Directory Boundary ጥበቃ
-$baseUploadDir = realpath(__DIR__ . '/uploads');
-$targetFullPath = realpath(__DIR__ . '/../' . ltrim($filePath, '/\\'));
+// 5. ጥብቅ Path Traversal እና Canonical Directory Boundary ጥበቃ
+$realBaseDir = realpath(__DIR__ . '/uploads');
+if (!$realBaseDir || !is_dir($realBaseDir)) {
+    jsonError('የሰቀላ ማውጫው አልተገኘም', 500);
+}
+// የማውጫውን ወሰን በ DIRECTORY_SEPARATOR መዝጋት (boundary bypass መከላከል)
+$canonicalBaseDir = rtrim($realBaseDir, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR;
 
-if (!$targetFullPath || !str_starts_with($targetFullPath, $baseUploadDir) || !file_exists($targetFullPath)) {
-    // ቀጥታ በ uploads ስር ያለ ከሆነ መፈተሽ
-    $directPath = realpath(__DIR__ . '/uploads/' . basename($filePath));
-    if ($directPath && str_starts_with($directPath, $baseUploadDir) && file_exists($directPath)) {
+$rawTarget = __DIR__ . '/../' . ltrim($filePath, '/\\');
+$targetFullPath = realpath($rawTarget);
+
+// ፋይሉ በ canonicalBaseDir ስር መሆኑን፣ መኖሩን እና symlink አለመሆኑን ማረጋገጥ
+if (!$targetFullPath || !str_starts_with($targetFullPath, $canonicalBaseDir) || !file_exists($targetFullPath) || is_link($targetFullPath)) {
+    // ቀጥታ በ uploads ስር በፋይሉ ስም መፈለግ
+    $directRaw = $canonicalBaseDir . basename($filePath);
+    $directPath = realpath($directRaw);
+    if ($directPath && str_starts_with($directPath, $canonicalBaseDir) && file_exists($directPath) && !is_link($directPath)) {
         $targetFullPath = $directPath;
     } else {
         jsonError('የተጠየቀው ፋይል በዲስክ ላይ አልተገኘም', 404);

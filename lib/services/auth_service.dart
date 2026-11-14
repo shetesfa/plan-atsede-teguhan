@@ -8,6 +8,27 @@ class AuthService {
   static Department? currentDepartment;
   static Map<String, dynamic>? currentUserProfile;
 
+  static int failedAttempts = 0;
+  static DateTime? lockUntil;
+  static const int maxFailedAttempts = 5;
+  static const int lockDurationMinutes = 15;
+
+  static bool get isLocked {
+    if (lockUntil == null) return false;
+    if (DateTime.now().isAfter(lockUntil!)) {
+      lockUntil = null;
+      failedAttempts = 0;
+      return false;
+    }
+    return true;
+  }
+
+  static int get remainingLockMinutes {
+    if (lockUntil == null) return 0;
+    final diff = lockUntil!.difference(DateTime.now()).inMinutes;
+    return diff > 0 ? diff : 1;
+  }
+
   static bool get isLoggedIn => currentDepartment != null && currentUserProfile != null;
   static bool get isSuperAdmin => currentUserProfile?['is_super_admin'] == true;
 
@@ -67,6 +88,10 @@ class AuthService {
 
   /// የተጠቃሚ መግቢያ (ከአገልጋዩ ጋር ብቻ — ምንም hardcoded bypass የለም!)
   static Future<String?> attemptLogin(Department dept, String password) async {
+    if (isLocked) {
+      return 'ስርዓቱ ለደህንነት ሲባል ተቆልፏል! የቀረው ጊዜ፡ $remainingLockMinutes ደቂቃ';
+    }
+
     if (password.isEmpty) {
       return 'እባክዎ የይለፍ ቃል ያስገቡ።';
     }
@@ -74,6 +99,8 @@ class AuthService {
     try {
       final res = await ApiService().login(dept.id, password); // Never trim password!
       if (res['success'] == true && res['user'] != null) {
+        failedAttempts = 0;
+        lockUntil = null;
         currentDepartment = dept;
         currentUserProfile = res['user'];
 
@@ -85,6 +112,11 @@ class AuthService {
         await prefs.setInt(_prefSessionExpiryKey, expiryMs);
         return null; // ስኬታማ መግቢያ
       } else {
+        failedAttempts++;
+        if (failedAttempts >= maxFailedAttempts) {
+          lockUntil = DateTime.now().add(const Duration(minutes: lockDurationMinutes));
+          return 'ተደጋጋሚ የተሳሳተ ሙከራ! ስርዓቱ ለ $lockDurationMinutes ደቂቃ ተቆልፏል!';
+        }
         return res['message'] ?? 'የተሳሳተ የተጠቃሚ ስም ወይም የይለፍ ቃል!';
       }
     } catch (e) {

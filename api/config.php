@@ -54,7 +54,7 @@ function jsonError(string $message, int $statusCode = 400, $errors = null): void
 }
 
 // 4. የተፈቀደ የ CORS ጥበቃ (Restricted Trusted Origins Only — Never use '*')
-$allowedOriginsStr = getenv('ALLOWED_ORIGINS') ?: 'http://localhost:3000,http://127.0.0.1:8000,http://localhost:8080,http://127.0.0.1';
+$allowedOriginsStr = getenv('ALLOWED_ORIGINS') ?: 'http://localhost:3000,http://127.0.0.1:8000,http://localhost:8080,http://127.0.0.1:8080,http://localhost:8085,http://127.0.0.1:8085,http://localhost:5000,http://127.0.0.1:5000,http://127.0.0.1';
 $allowedOrigins = array_filter(array_map('trim', explode(',', $allowedOriginsStr)));
 
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
@@ -301,6 +301,10 @@ function requireChatRoomMembership(array $auth, string $roomOrChannel): void {
     global $pdo;
     $room = trim($roomOrChannel);
 
+    if (empty($room)) {
+        jsonError('የውይይት ክፍል መለያ አልተገለጸም (Bad Request).', 400);
+    }
+
     // 1. በዳታቤዝ ውስጥ ሩሙን መፈለግ (Database-backed Membership Model)
     if ($pdo !== null) {
         try {
@@ -309,7 +313,7 @@ function requireChatRoomMembership(array $auth, string $roomOrChannel): void {
             $dbRoom = $rStmt->fetch();
             if ($dbRoom) {
                 if (!empty($dbRoom['is_public'])) {
-                    return; // ይፋዊ ሩም
+                    return; // ይፋዊ ሩም ለሁሉም ክፍት ነው
                 }
                 if (!empty($dbRoom['is_office_only'])) {
                     if (empty($auth['is_super_admin'])) {
@@ -323,13 +327,20 @@ function requireChatRoomMembership(array $auth, string $roomOrChannel): void {
                     }
                     return;
                 }
+                // ክፍሉ ይፋዊ ሳይሆንና target_dept ሳይኖረው ሲቀር ፅ/ቤት ብቻ ይፈቀዳል
+                if (empty($auth['is_super_admin'])) {
+                    jsonError('የተከለከለ ክንውን! ወደዚህ የተዘጋ የውይይት ክፍል የመግባት ፈቃድ የለዎትም (Forbidden).', 403);
+                }
+                return;
             }
         } catch (\Exception $e) {
+            // Fail-Closed: የዳታቤዝ ስህተት ከተፈጠረ መዳረሻውን ወዲያውኑ ማገድ (Never fall back after DB error)
             error_log("requireChatRoomMembership DB lookup error: " . $e->getMessage());
+            jsonError('የውይይት ክፍል ፈቃድን ማረጋገጥ አልተቻለም (Fail-Closed Security Error).', 500);
         }
     }
 
-    // 2. ነባሪ ህጎች (Fallback rules)
+    // 2. በዳታቤዝ ውስጥ ላልተመዘገቡ ይፋዊ ወይም የክፍል መለያዎች ጥብቅ ፈቃድ (Strict Rules)
     $publicChannels = ['ይፋዊ መመሪያዎች', 'general', 'ጠቅላላ ውይይት', 'public', 'all', 'room_official', 'room_leaders', 'room_docs'];
     if (in_array($room, $publicChannels, true)) {
         return;
@@ -352,10 +363,8 @@ function requireChatRoomMembership(array $auth, string $roomOrChannel): void {
         return;
     }
 
-    // ነባሪ ጥበቃ - ስሙ የክፍሉን ስም ካልያዘ እና ፅ/ቤት ካልሆነ መከልከል
-    if (empty($auth['is_super_admin']) && !str_contains($room, $auth['department_id'])) {
-        jsonError('የተከለከለ ክንውን! ወደዚህ የውይይት ክፍል የመግባት ፈቃድ የለዎትም (Forbidden).', 403);
-    }
+    // ያልታወቀ ክፍል ከሆነ በጥብቅ መከልከል (Fail-Closed)
+    jsonError('የተከለከለ ክንውን! ያልታወቀ ወይም ያልተፈቀደ የውይይት ክፍል (Forbidden).', 403);
 }
 
 // 10. የመግቢያ Rate Limiting (Brute-Force Protection)

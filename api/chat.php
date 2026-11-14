@@ -151,4 +151,81 @@ if ($method === 'POST') {
     ], 201);
 }
 
+// 3. መልእክት ማሻሻል (Message Edit — Sender, Department & Actual Room Verification)
+if ($method === 'PUT' || $method === 'PATCH') {
+    $input = getJsonInput();
+    $msgId = trim($_GET['id'] ?? ($input['id'] ?? ''));
+
+    if (empty($msgId)) {
+        jsonError('የመልእክት መለያ (id) ያስፈልጋል', 400);
+    }
+
+    $cStmt = $pdo->prepare("SELECT id, room_id, channel, department_id, sender_name, is_deleted FROM chat_messages WHERE id = ? LIMIT 1");
+    $cStmt->execute([$msgId]);
+    $existing = $cStmt->fetch();
+
+    if (!$existing || !empty($existing['is_deleted'])) {
+        jsonError('መልእክቱ አልተገኘም ወይም ተሰርዟል', 404);
+    }
+
+    // 1. በዳታቤዝ ውስጥ የተመዘገበውን እውነተኛ ክፍል (Actual Room) ማረጋገጥ
+    $actualRoom = $existing['channel'] ?: $existing['room_id'];
+    requireChatRoomMembership($auth, $actualRoom);
+
+    // 2. የክፍል ባለቤትነት ማረጋገጥ
+    if (!$auth['is_super_admin'] && $existing['department_id'] !== $auth['department_id']) {
+        jsonError('የተከለከለ ክንውን! የሌላ ክፍልን መልእክት ማሻሻል አይፈቀድም (Forbidden).', 403);
+    }
+
+    // 3. የላኪ ባለቤትነት ማረጋገጥ (Sender Ownership Verification)
+    $mySenderName = $auth['full_name'] ?? $auth['username'];
+    if (!$auth['is_super_admin'] && $existing['sender_name'] !== $mySenderName) {
+        jsonError('የተከለከለ ክንውን! የሌላ ሰውን መልእክት ማሻሻል አይቻልም (Forbidden).', 403);
+    }
+
+    $newMessage = trim($input['message'] ?? '');
+    if (empty($newMessage)) {
+        jsonError('የመልእክት ይዘት ያስፈልጋል', 400);
+    }
+
+    $uStmt = $pdo->prepare("UPDATE chat_messages SET message = ?, updated_at = NOW() WHERE id = ?");
+    $uStmt->execute([$newMessage, $msgId]);
+
+    jsonResponse(['message' => 'መልእክቱ በተሳካ ሁኔታ ተሻሽሏል', 'id' => $msgId]);
+}
+
+// 4. መልእክት መሰረዝ (Message Soft Delete — Ownership & Admin Policy)
+if ($method === 'DELETE') {
+    $msgId = trim($_GET['id'] ?? '');
+
+    if (empty($msgId)) {
+        jsonError('የመልእክት መለያ (id) ያስፈልጋል', 400);
+    }
+
+    $cStmt = $pdo->prepare("SELECT id, room_id, channel, department_id, sender_name, is_deleted FROM chat_messages WHERE id = ? LIMIT 1");
+    $cStmt->execute([$msgId]);
+    $existing = $cStmt->fetch();
+
+    if (!$existing || !empty($existing['is_deleted'])) {
+        jsonError('መልእክቱ አልተገኘም ወይም ተሰርዟል', 404);
+    }
+
+    $actualRoom = $existing['channel'] ?: $existing['room_id'];
+    requireChatRoomMembership($auth, $actualRoom);
+
+    if (!$auth['is_super_admin'] && $existing['department_id'] !== $auth['department_id']) {
+        jsonError('የተከለከለ ክንውን! የሌላ ክፍልን መልእክት መሰረዝ አይፈቀድም (Forbidden).', 403);
+    }
+
+    $mySenderName = $auth['full_name'] ?? $auth['username'];
+    if (!$auth['is_super_admin'] && $existing['sender_name'] !== $mySenderName) {
+        jsonError('የተከለከለ ክንውን! የሌላ ሰውን መልእክት መሰረዝ አይቻልም (Forbidden).', 403);
+    }
+
+    $dStmt = $pdo->prepare("UPDATE chat_messages SET is_deleted = 1, updated_at = NOW() WHERE id = ?");
+    $dStmt->execute([$msgId]);
+
+    jsonResponse(['message' => 'መልእክቱ ተሰርዟል', 'id' => $msgId]);
+}
+
 jsonError('ያልተፈቀደ ዘዴ', 405);
