@@ -129,8 +129,12 @@ class ChatService extends ChangeNotifier {
   }
 
   void _startPolling() {
+    // Audit M4: was every 5 s — three services polling at once (chat 5 s,
+    // notifications 15 s, Telegram long-poll) drained battery and mobile
+    // data. 30 s is still frequent enough for a department chat, and the
+    // user can pull-to-refresh / switch channel for an immediate fetch.
     _pollingTimer?.cancel();
-    _pollingTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+    _pollingTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       refreshMessages(_activeChannel);
     });
   }
