@@ -1,18 +1,55 @@
+// TelegramService — የቤተክርስቲያኑን Telegram bot ከአፑ ጋር የሚያገናኝ አገልግሎት.
+//
+// የደህንነት ማስታወሻዎች (audit 2026-11-14):
+// - H3: Bot token የሚቀመጠው በ flutter_secure_storage ብቻ ነው — በ
+//   SharedPreferences (plaintext) በጭራሽ አይቀመጥም። የቆየ token ካለ,
+//   init() ሲጠራ ወደ secure storage ይዛወራል እና የቆየው ግቤት ይሰረዛል.
+//   Token በ URL query string ውስጥ በጭራሽ አይላክም፤
+//   ወደ Render proxy ሲላክ የሚላከው በ `Authorization: Bearer` header ብቻ
+//   ነው፤ proxyው የራሱን server-side token ካልተዋቀረ ይጠቀማል።
+//   (ወደ api.telegram.org ቀጥታ ጥሪ ሲደረግ token በ URL path ውስጥ
+//   `bot<token>/...` መልክ መሆን የ Telegram Bot API ንድፍ ነው —
+//   በ query string አይደለም።)
+// - H4: ምንም hardcoded Telegram chat ID የለም። Chat ID የሚነበበው ከ
+//   secure storage (`atsede_telegram_chat_id`) ብቻ ነው፤ ካልተዋቀረ
+//   ባዶ ('') ነው — መልእክት ወደ ማንም ሰው chat በ fallback አይላክም።
+//   Chat ID የሚያዋቅረው የቤተክርስቲያን አስተዳዳሪ (admin) ነው። መልእክት
+//   ከመላኩ በፊት chat ID ከሌለ፣ መላኪያው በግልጽ ስህተት ይቋረጣል።
+// - H8: Telegram `getUpdates` በአፑ ውስጥ በጭራሽ አይጠራም። getUpdates
+//   በ Telegram በኩል በአንድ ጊዜ ለአንድ consumer ብቻ ይሰጣል፤ ብቸኛ
+//   consumer የ bot server (Render) polling loop ነው። አፑ የውይይት
+//   ታሪክ የሚያነበው ከ server-side PHP chat API (`chat.php`) በኩል ብቻ ነው።
+// - L4: የ bot መልእክቶች እንደ ተጠቃሚው የላኩት (`isMe`) አይታዩም፤
+//   `isMe` የሚሆነው sender ከአሁኑ ተጠቃሚ ጋር ሲዛመድ ብቻ ነው።
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'api_service.dart';
 
 class TelegramService {
   static String botToken = '';
   static String get baseUrl => botToken.isNotEmpty ? 'https://api.telegram.org/bot$botToken' : '';
   static String get fileBaseUrl => botToken.isNotEmpty ? 'https://api.telegram.org/file/bot$botToken' : '';
   static const String cloudBackendUrl = 'https://plan-atsede-teguhan.onrender.com';
-  
+
   static String? savedChatId;
-  static const String _prefChatIdKey = 'atsede_telegram_chat_id';
-  static const String _prefBotTokenKey = 'atsede_telegram_bot_token';
+
+  // H3/H4: Token እና chat ID የሚቀመጡት በ secure storage ብቻ ነው።
+  // እነዚህ ቁልፎች ከዚህ በፊት በ SharedPreferences ይጠቀሙበት የነበሩት
+  // ተመሳሳይ ስሞች ናቸው — ስለዚህ የቆየ plaintext ግቤት ካለ፣ init()
+  // ወደ secure storage ሲያዛውረው ሊያገኘው ይችላል።
+  static const String _secureBotTokenKey = 'atsede_telegram_bot_token';
+  static const String _secureChatIdKey = 'atsede_telegram_chat_id';
+  static const _secureStorage = FlutterSecureStorage(
+    aOptions: AndroidOptions(),
+  );
+
+  // H8: የውይይት ታሪክ ከ server-side chat API የሚነበውበት ቻናል።
+  static const String _chatApiChannel = 'ይፋዊ መመሪያዎች';
 
   // የቀጥታ ዥረት (Real-time Stream) ለውይይት
   static final StreamController<List<TelegramLiveMessage>> _messageStreamController =
@@ -23,37 +60,88 @@ class TelegramService {
   static List<TelegramLiveMessage> get currentMessages => List.unmodifiable(_cachedMessages);
 
   static bool _isPollerRunning = false;
-  static int? _lastUpdateId;
 
-  /// የተቀመጠውን Chat ID እና Bot Token ከአካባቢ ማህደረ-ትውስታ ይጭናል
+  /// የተቀመጠውን Chat ID እና Bot Token ከደህንነቱ የተጠበቀ ማህደረ-ትውስታ ይጭናል.
+  ///
+  /// ከዚህ በፊት በ SharedPreferences (plaintext) የተቀመጠ token/chat ID
+  /// ካለ፣ ወደ secure storage ይዛወራል እና የቆየው plaintext ግቤት ይሰረዛል (H3).
+  /// Chat ID ካልተዋቀረ `savedChatId` ባዶ string ነው — ምንም fallback የለም (H4).
   static Future<void> init() async {
     try {
+      botToken = await _secureStorage.read(key: _secureBotTokenKey) ?? '';
+      savedChatId = await _secureStorage.read(key: _secureChatIdKey) ?? '';
+
+      // የቆየ plaintext ግቤት ከ SharedPreferences ወደ secure storage ማዛወር።
       final prefs = await SharedPreferences.getInstance();
-      savedChatId = prefs.getString(_prefChatIdKey) ?? '';
-      botToken = prefs.getString(_prefBotTokenKey) ?? '';
+      if (botToken.isEmpty) {
+        final legacyToken = prefs.getString(_secureBotTokenKey);
+        if (legacyToken != null && legacyToken.isNotEmpty) {
+          botToken = legacyToken;
+          await _secureStorage.write(key: _secureBotTokenKey, value: legacyToken);
+        }
+      }
+      if (savedChatId == null || savedChatId!.isEmpty) {
+        final legacyChatId = prefs.getString(_secureChatIdKey);
+        if (legacyChatId != null && legacyChatId.isNotEmpty) {
+          savedChatId = legacyChatId;
+          await _secureStorage.write(key: _secureChatIdKey, value: legacyChatId);
+        }
+      }
+      // የቆዩ plaintext ቅጂዎች ሁልጊዜ ይሰረዛሉ — secure storage ውስጥ እሴት
+      // ቢኖርም እንኳን።
+      await prefs.remove(_secureBotTokenKey);
+      await prefs.remove(_secureChatIdKey);
     } catch (_) {}
   }
 
-  /// Bot Token ን ቋሚ አድርጎ መመዝገብ
+  /// Bot Token ን በ secure storage ብቻ ቋሚ አድርጎ መመዝገብ (H3).
   static Future<void> saveBotToken(String token) async {
     botToken = token.trim();
     try {
+      if (botToken.isEmpty) {
+        await _secureStorage.delete(key: _secureBotTokenKey);
+      } else {
+        await _secureStorage.write(key: _secureBotTokenKey, value: botToken);
+      }
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_prefBotTokenKey, botToken);
+      await prefs.remove(_secureBotTokenKey);
     } catch (_) {}
   }
 
-  /// Chat ID ን ቋሚ አድርጎ መመዝገብ
+  /// Chat ID ን በ secure storage ብቻ ቋሚ አድርጎ መመዝገብ (H4).
+  /// Chat ID የሚያዋቅረው የቤተክርስቲያን አስተዳዳሪ (admin) ነው።
   static Future<void> saveChatId(String chatId) async {
     savedChatId = chatId.trim();
     try {
+      if (savedChatId == null || savedChatId!.isEmpty) {
+        await _secureStorage.delete(key: _secureChatIdKey);
+      } else {
+        await _secureStorage.write(key: _secureChatIdKey, value: savedChatId);
+      }
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_prefChatIdKey, savedChatId!);
+      await prefs.remove(_secureChatIdKey);
     } catch (_) {}
+  }
+
+  /// ወደ Render proxy ሲላክ የሚጠቀሙ headers። Token የሚላከው በ
+  /// `Authorization: Bearer` header ብቻ ነው — በ URL query ወይም
+  /// በ body field (`bot_token`) አይላክም (H3)። Token ካልተዋቀረ header
+  /// አይላክም፤ proxyው የራሱን server-side token ይጠቀማል።
+  static Map<String, String> _proxyHeaders({bool json = true}) {
+    final headers = <String, String>{};
+    if (json) headers['Content-Type'] = 'application/json';
+    if (botToken.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $botToken';
+    }
+    return headers;
   }
 
   /// የቴሌግራም ፋይል ቀጥተኛ URL ማግኘት (ፎቶ ወይም ሰነድ)
   static Future<String?> getFileUrl(String fileId) async {
+    if (botToken.isEmpty) {
+      debugPrint('Telegram getFileUrl: Bot Token አልተዋቀረም!');
+      return null;
+    }
     try {
       final uri = Uri.parse('$baseUrl/getFile?file_id=$fileId');
       final res = await http.get(uri).timeout(const Duration(seconds: 6));
@@ -70,11 +158,22 @@ class TelegramService {
     return null;
   }
 
-  /// የቀጥታ (Real-time Long Polling) አድማጭ ማስጀመር
+  /// የቀጥታ (Real-time) አድማጭ ማስጀመር.
+  ///
+  /// H8: አፑ Telegram `getUpdates` long-polling አያደርግም። getUpdates
+  /// በአንድ ጊዜ ለአንድ consumer ብቻ ይሰጣል፤ ብቸኛ consumer የ bot server
+  /// (Render) polling loop ነው — አፑ ሁለተኛ consumer ቢሆን updates
+  /// ይቀማማሉ። ስለዚህ ይህ method ምንም polling loop አይጀምርም፤ የውይይት
+  /// ታሪክ የሚመጣው `fetchInitialMessages()` ከ server-side chat API
+  /// በኩል ብቻ ነው። ለተኳሃኝነት (chat_screen ይጠራዋል) signatureው ተጠብቋል።
   static void startRealtimeListener() {
     if (_isPollerRunning) return;
     _isPollerRunning = true;
-    _runPollerLoop();
+    debugPrint(
+      'Telegram realtime listener: app does not poll getUpdates — '
+      'the bot server is the single getUpdates consumer; '
+      'history is read from the server chat API instead.',
+    );
   }
 
   /// የቀጥታ አድማጭ ማቆም
@@ -82,245 +181,54 @@ class TelegramService {
     _isPollerRunning = false;
   }
 
-  /// Long Polling ሉፕ - ያለ ማቋረጥ እና ያለ Refresh አዳዲስ መልእክቶችን በቅጽበት ያዳምጣል
-  static Future<void> _runPollerLoop() async {
-    while (_isPollerRunning) {
-      try {
-        final queryParams = <String, String>{
-          'timeout': '15',
-          'allowed_updates': jsonEncode(['message', 'channel_post']),
-        };
-        if (_lastUpdateId != null) {
-          queryParams['offset'] = '$_lastUpdateId';
-        }
-
-        http.Response? response;
-        try {
-          final uri = Uri.parse('$baseUrl/getUpdates').replace(queryParameters: queryParams);
-          response = await http.get(uri).timeout(const Duration(seconds: 20));
-        } catch (_) {
-          // ቀጥታ ካልሰራ ከ Render Proxy እንጠይቅ
-          try {
-            final proxyUri = Uri.parse('$cloudBackendUrl/api/telegram/getUpdates').replace(
-              queryParameters: {
-                ...queryParams,
-                'bot_token': botToken,
-              },
-            );
-            response = await http.get(proxyUri).timeout(const Duration(seconds: 22));
-          } catch (_) {}
-        }
-
-        if (!_isPollerRunning) break;
-        if (response == null) {
-          await Future.delayed(const Duration(seconds: 4));
-          continue;
-        }
-
-        if (response.statusCode == 401) {
-          debugPrint('Telegram 401: Unauthorized');
-          await Future.delayed(const Duration(seconds: 15));
-          continue;
-        }
-
-        if (response.statusCode == 200) {
-          final data = jsonDecode(response.body);
-          if (data['ok'] == true && data['result'] is List) {
-            final List results = data['result'];
-            bool hasNew = false;
-
-            for (var update in results) {
-              final updateId = update['update_id'] as int;
-              _lastUpdateId = updateId + 1;
-
-              final msg = update['message'] ?? update['channel_post'];
-              if (msg == null) continue;
-
-              final chat = msg['chat'];
-              final chatId = chat?['id']?.toString();
-
-              if (chatId == savedChatId || chatId == '1537845176' || chatId == '-1004395752939') {
-                final messageId = msg['message_id'] as int? ?? 0;
-                if (_cachedMessages.any((m) => m.messageId == messageId)) {
-                  continue;
-                }
-
-                final from = msg['from'] ?? {};
-                final firstName = from['first_name'] ?? 'አባል';
-                final lastName = from['last_name'] ?? '';
-                final senderName = '$firstName $lastName'.trim();
-                final username = from['username'];
-                final isBot = from['is_bot'] == true;
-
-                String? photoUrl;
-                final photos = msg['photo'] as List?;
-                if (photos != null && photos.isNotEmpty) {
-                  final bestPhoto = photos.last;
-                  final fileId = bestPhoto['file_id'] as String?;
-                  if (fileId != null) {
-                    photoUrl = await getFileUrl(fileId);
-                  }
-                }
-
-                String? docName;
-                String? docUrl;
-                final doc = msg['document'];
-                if (doc != null) {
-                  docName = doc['file_name'] as String? ?? 'ሰነድ.pdf';
-                  final docFileId = doc['file_id'] as String?;
-                  if (docFileId != null) {
-                    docUrl = await getFileUrl(docFileId);
-                  }
-                }
-
-                String text = msg['text'] ?? msg['caption'] ?? '';
-                if (text.isEmpty) {
-                  if (photoUrl != null) text = '📷 [ምስል ተልኳል]';
-                  if (docName != null) text = '📄 [$docName ተልኳል]';
-                }
-
-                if (text.isEmpty && photoUrl == null && docName == null) continue;
-
-                final dateSec = msg['date'] as int? ?? 0;
-                final date = DateTime.fromMillisecondsSinceEpoch(dateSec * 1000);
-                final timeStr =
-                    '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
-
-                _cachedMessages.add(
-                  TelegramLiveMessage(
-                    messageId: messageId,
-                    senderName: senderName.isEmpty ? 'የግሩፕ አባል' : senderName,
-                    username: username,
-                    text: text,
-                    time: timeStr,
-                    isFromApp: isBot,
-                    isMe: isBot,
-                    photoUrl: photoUrl,
-                    documentName: docName,
-                    documentUrl: docUrl,
-                  ),
-                );
-                hasNew = true;
-              }
-            }
-
-            if (hasNew) {
-              _messageStreamController.add(List.unmodifiable(_cachedMessages));
-            }
-          }
-        }
-      } catch (e) {
-        await Future.delayed(const Duration(seconds: 2));
-      }
-    }
-  }
-
-  /// ጅምር መልዕክቶችን መጫን
+  /// ጅምር መልዕክቶችን መጫን — ከ server-side PHP chat API (`chat.php`)
+  /// በኩል ብቻ (H8)። Telegram `getUpdates` በጭራሽ አይጠራም፤ token በ URL
+  /// ውስጥ አይላክም — ApiService Bearer auth header ይጠቀማል።
+  /// PHP API ካልተጫነ ወይም login ካልተደረገ፣ የተቀመጡ መልእክቶች ብቻ ይመለሳሉ።
   static Future<List<TelegramLiveMessage>> fetchInitialMessages() async {
     try {
-      http.Response? response;
-      try {
-        final uri = Uri.parse('$baseUrl/getUpdates?limit=50');
-        response = await http.get(uri).timeout(const Duration(seconds: 8));
-      } catch (_) {
-        try {
-          final proxyUri = Uri.parse('$cloudBackendUrl/api/telegram/getUpdates?limit=50&bot_token=$botToken');
-          response = await http.get(proxyUri).timeout(const Duration(seconds: 10));
-        } catch (_) {}
-      }
+      final rows = await ApiService().getChatMessages(_chatApiChannel);
+      final currentUserName = ApiService.currentUser?['full_name']?.toString() ?? '';
 
-      if (response == null || response.statusCode != 200) {
-        return _cachedMessages;
-      }
-
-      final data = jsonDecode(response.body);
-      if (data['ok'] != true || data['result'] == null) {
-        return _cachedMessages;
-      }
-
-      final List results = data['result'];
-      for (var update in results) {
-        final updateId = update['update_id'] as int;
-        if (_lastUpdateId == null || updateId >= _lastUpdateId!) {
-          _lastUpdateId = updateId + 1;
+      for (final raw in rows) {
+        final messageId = int.tryParse(raw['id']?.toString() ?? '') ?? raw['id'].hashCode;
+        if (_cachedMessages.any((m) => m.messageId == messageId)) {
+          continue;
         }
 
-        final msg = update['message'] ?? update['channel_post'];
-        if (msg == null) continue;
+        final senderName = (raw['sender_name'] ?? raw['senderName'] ?? 'አባል').toString();
+        final text = (raw['message'] ?? '').toString();
+        if (text.isEmpty) continue;
 
-        final chat = msg['chat'];
-        final chatId = chat?['id']?.toString();
+        final createdAt = (raw['created_at'] ?? '').toString();
+        final timeStr = createdAt.length >= 16 ? createdAt.substring(11, 16) : '00:00';
 
-        if (chatId == savedChatId || chatId == '1537845176' || chatId == '-1004395752939') {
-          final messageId = msg['message_id'] as int? ?? 0;
-          if (_cachedMessages.any((m) => m.messageId == messageId)) {
-            continue;
-          }
+        // L4: `isMe` የሚሆነው sender ከአሁኑ ተጠቃሚ ጋር ሲዛመድ ብቻ ነው፤
+        // የ bot ወይም የሌላ አባል መልእክት እንደ "የእኔ" በጭራሽ አይታይም።
+        final isMe = currentUserName.isNotEmpty && senderName == currentUserName;
 
-          final from = msg['from'] ?? {};
-          final firstName = from['first_name'] ?? 'አባል';
-          final lastName = from['last_name'] ?? '';
-          final senderName = '$firstName $lastName'.trim();
-          final username = from['username'];
-          final isBot = from['is_bot'] == true;
-
-          String? photoUrl;
-          final photos = msg['photo'] as List?;
-          if (photos != null && photos.isNotEmpty) {
-            final bestPhoto = photos.last;
-            final fileId = bestPhoto['file_id'] as String?;
-            if (fileId != null) {
-              photoUrl = await getFileUrl(fileId);
-            }
-          }
-
-          String? docName;
-          String? docUrl;
-          final doc = msg['document'];
-          if (doc != null) {
-            docName = doc['file_name'] as String? ?? 'ሰነድ.pdf';
-            final docFileId = doc['file_id'] as String?;
-            if (docFileId != null) {
-              docUrl = await getFileUrl(docFileId);
-            }
-          }
-
-          String text = msg['text'] ?? msg['caption'] ?? '';
-          if (text.isEmpty) {
-            if (photoUrl != null) text = '📷 [ምስል ተልኳል]';
-            if (docName != null) text = '📄 [$docName ተልኳል]';
-          }
-
-          if (text.isEmpty && photoUrl == null && docName == null) continue;
-
-          final dateSec = msg['date'] as int? ?? 0;
-          final date = DateTime.fromMillisecondsSinceEpoch(dateSec * 1000);
-          final timeStr =
-              '${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
-
-          _cachedMessages.add(
-            TelegramLiveMessage(
-              messageId: messageId,
-              senderName: senderName.isEmpty ? 'የግሩፕ አባል' : senderName,
-              username: username,
-              text: text,
-              time: timeStr,
-              isFromApp: isBot,
-              isMe: isBot,
-              photoUrl: photoUrl,
-              documentName: docName,
-              documentUrl: docUrl,
-            ),
-          );
-        }
+        _cachedMessages.add(
+          TelegramLiveMessage(
+            messageId: messageId,
+            senderName: senderName,
+            username: null,
+            text: text,
+            time: timeStr,
+            isFromApp: false,
+            isMe: isMe,
+            isBot: false,
+            photoUrl: null,
+            documentName: null,
+            documentUrl: null,
+          ),
+        );
       }
 
       _messageStreamController.add(List.unmodifiable(_cachedMessages));
-      return _cachedMessages;
     } catch (e) {
       debugPrint('Telegram fetchInitialMessages exception: $e');
-      return _cachedMessages;
     }
+    return _cachedMessages;
   }
 
   /// የጽሑፍ ማሳወቂያ ወደ ቴሌግራም መላክ (በቀጥታ እና በደመና Proxy ባለሁለት አማራጭ)
@@ -331,42 +239,49 @@ class TelegramService {
   }) async {
     final chatId = targetChatId ?? savedChatId;
     if (chatId == null || chatId.isEmpty) {
-      debugPrint('Telegram error: Chat ID አልተገኘም!');
+      // H4: Chat ID ካልተዋቀረ ወደ ማንም ሰው chat በ fallback አንልክም —
+      // አስተዳዳሪው (admin) Chat ID ማዋቀር አለበት።
+      debugPrint(
+        'Telegram error: Chat ID አልተዋቀረም! መልእክቱ አልተላከም። '
+        'የቤተክርስቲያን አስተዳዳሪው Chat ID በ Telegram ቅንብሮች ማስገባት አለበት።',
+      );
       return false;
     }
 
-    // አማራጭ 1፦ በቀጥታ ወደ ቴሌግራም ኤፒአይ መሞከር
-    try {
-      final uri = Uri.parse('$baseUrl/sendMessage');
-      final response = await http.post(
-        uri,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'chat_id': chatId,
-          'text': text,
-          'parse_mode': parseMode,
-        }),
-      ).timeout(const Duration(seconds: 7));
+    // አማራጭ 1፦ በቀጥታ ወደ ቴሌግራም ኤፒአይ መሞከር (token ካለ ብቻ)
+    if (botToken.isNotEmpty) {
+      try {
+        final uri = Uri.parse('$baseUrl/sendMessage');
+        final response = await http.post(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'chat_id': chatId,
+            'text': text,
+            'parse_mode': parseMode,
+          }),
+        ).timeout(const Duration(seconds: 7));
 
-      final data = jsonDecode(response.body);
-      if (data['ok'] == true) {
-        return true;
+        final data = jsonDecode(response.body);
+        if (data['ok'] == true) {
+          return true;
+        }
+      } catch (e) {
+        debugPrint('Direct Telegram send failed, trying Cloud Proxy: $e');
       }
-    } catch (e) {
-      debugPrint('Direct Telegram send failed, trying Cloud Proxy: $e');
     }
 
     // አማራጭ 2፦ በ Render Cloud Proxy በኩል መላክ (100% አስተማማኝ)
+    // H3: token የሚላከው በ Authorization Bearer header ብቻ ነው።
     try {
       final proxyUri = Uri.parse('$cloudBackendUrl/api/telegram/sendMessage');
       final response = await http.post(
         proxyUri,
-        headers: {'Content-Type': 'application/json'},
+        headers: _proxyHeaders(),
         body: jsonEncode({
           'chat_id': chatId,
           'text': text,
           'parse_mode': parseMode,
-          'bot_token': botToken,
         }),
       ).timeout(const Duration(seconds: 12));
 
@@ -402,44 +317,50 @@ class TelegramService {
   }) async {
     final chatId = targetChatId ?? savedChatId;
     if (chatId == null || chatId.isEmpty) {
-      debugPrint('Telegram error: Chat ID አልተገኘም!');
+      // H4: Chat ID ካልተዋቀረ ወደ ማንም ሰው chat በ fallback አንልክም።
+      debugPrint(
+        'Telegram error: Chat ID አልተዋቀረም! ሰነዱ አልተላከም። '
+        'የቤተክርስቲያን አስተዳዳሪው Chat ID በ Telegram ቅንብሮች ማስገባት አለበት።',
+      );
       return false;
     }
 
     final safeFileName = fileName.endsWith('.pdf') ? fileName : '$fileName.pdf';
 
-    // አማራጭ 1፦ ቀጥታ ጥሪ
-    try {
-      final uri = Uri.parse('$baseUrl/sendDocument');
-      final request = http.MultipartRequest('POST', uri)..fields['chat_id'] = chatId;
+    // አማራጭ 1፦ ቀጥታ ጥሪ (token ካለ ብቻ)
+    if (botToken.isNotEmpty) {
+      try {
+        final uri = Uri.parse('$baseUrl/sendDocument');
+        final request = http.MultipartRequest('POST', uri)..fields['chat_id'] = chatId;
 
-      if (caption != null && caption.isNotEmpty) {
-        request.fields['caption'] = caption;
-        request.fields['parse_mode'] = 'HTML';
+        if (caption != null && caption.isNotEmpty) {
+          request.fields['caption'] = caption;
+          request.fields['parse_mode'] = 'HTML';
+        }
+
+        request.files.add(
+          http.MultipartFile.fromBytes(
+            'document',
+            fileBytes,
+            filename: safeFileName,
+          ),
+        );
+
+        final streamedResponse = await request.send().timeout(const Duration(seconds: 15));
+        final response = await http.Response.fromStream(streamedResponse);
+        final data = jsonDecode(response.body);
+        if (data['ok'] == true) return true;
+      } catch (e) {
+        debugPrint('Direct sendDocument failed, trying Cloud Proxy: $e');
       }
-
-      request.files.add(
-        http.MultipartFile.fromBytes(
-          'document',
-          fileBytes,
-          filename: safeFileName,
-        ),
-      );
-
-      final streamedResponse = await request.send().timeout(const Duration(seconds: 15));
-      final response = await http.Response.fromStream(streamedResponse);
-      final data = jsonDecode(response.body);
-      if (data['ok'] == true) return true;
-    } catch (e) {
-      debugPrint('Direct sendDocument failed, trying Cloud Proxy: $e');
     }
 
     // አማራጭ 2፦ በ Render Cloud Proxy በኩል
+    // H3: token የሚላከው በ Authorization Bearer header ብቻ ነው።
     try {
       final uri = Uri.parse('$cloudBackendUrl/api/telegram/sendDocument');
-      final request = http.MultipartRequest('POST', uri)
-        ..fields['chat_id'] = chatId
-        ..fields['bot_token'] = botToken;
+      final request = http.MultipartRequest('POST', uri)..fields['chat_id'] = chatId;
+      request.headers.addAll(_proxyHeaders(json: false));
 
       if (caption != null && caption.isNotEmpty) {
         request.fields['caption'] = caption;
@@ -472,42 +393,48 @@ class TelegramService {
   }) async {
     final chatId = targetChatId ?? savedChatId;
     if (chatId == null || chatId.isEmpty) {
-      debugPrint('Telegram error: Chat ID አልተገኘም!');
+      // H4: Chat ID ካልተዋቀረ ወደ ማንም ሰው chat በ fallback አንልክም።
+      debugPrint(
+        'Telegram error: Chat ID አልተዋቀረም! ምስሉ አልተላከም። '
+        'የቤተክርስቲያን አስተዳዳሪው Chat ID በ Telegram ቅንብሮች ማስገባት አለበት።',
+      );
       return false;
     }
 
-    // አማራጭ 1፦ ቀጥታ ጥሪ
-    try {
-      final uri = Uri.parse('$baseUrl/sendPhoto');
-      final request = http.MultipartRequest('POST', uri)..fields['chat_id'] = chatId;
+    // አማራጭ 1፦ ቀጥታ ጥሪ (token ካለ ብቻ)
+    if (botToken.isNotEmpty) {
+      try {
+        final uri = Uri.parse('$baseUrl/sendPhoto');
+        final request = http.MultipartRequest('POST', uri)..fields['chat_id'] = chatId;
 
-      if (caption != null && caption.isNotEmpty) {
-        request.fields['caption'] = caption;
-        request.fields['parse_mode'] = 'HTML';
+        if (caption != null && caption.isNotEmpty) {
+          request.fields['caption'] = caption;
+          request.fields['parse_mode'] = 'HTML';
+        }
+
+        request.files.add(
+          http.MultipartFile.fromBytes(
+            'photo',
+            imageBytes,
+            filename: fileName,
+          ),
+        );
+
+        final streamedResponse = await request.send().timeout(const Duration(seconds: 15));
+        final response = await http.Response.fromStream(streamedResponse);
+        final data = jsonDecode(response.body);
+        if (data['ok'] == true) return true;
+      } catch (e) {
+        debugPrint('Direct sendPhoto failed, trying Cloud Proxy: $e');
       }
-
-      request.files.add(
-        http.MultipartFile.fromBytes(
-          'photo',
-          imageBytes,
-          filename: fileName,
-        ),
-      );
-
-      final streamedResponse = await request.send().timeout(const Duration(seconds: 15));
-      final response = await http.Response.fromStream(streamedResponse);
-      final data = jsonDecode(response.body);
-      if (data['ok'] == true) return true;
-    } catch (e) {
-      debugPrint('Direct sendPhoto failed, trying Cloud Proxy: $e');
     }
 
     // አማራጭ 2፦ በ Cloud Proxy በኩል
+    // H3: token የሚላከው በ Authorization Bearer header ብቻ ነው።
     try {
       final uri = Uri.parse('$cloudBackendUrl/api/telegram/sendPhoto');
-      final request = http.MultipartRequest('POST', uri)
-        ..fields['chat_id'] = chatId
-        ..fields['bot_token'] = botToken;
+      final request = http.MultipartRequest('POST', uri)..fields['chat_id'] = chatId;
+      request.headers.addAll(_proxyHeaders(json: false));
 
       if (caption != null && caption.isNotEmpty) {
         request.fields['caption'] = caption;
@@ -531,81 +458,20 @@ class TelegramService {
     }
   }
 
-  /// ቦቱን ያናገሩ የቅርብ ጊዜ ግሩፖችን ወይም ተጠቃሚዎችን Chat ID በራስ-ሰር መፈለግ
+  /// ቦቱን ያናገሩ የቅርብ ጊዜ ግሩፖችን ወይም ተጠቃሚዎችን Chat ID በራስ-ሰር መፈለግ.
+  ///
+  /// H8/H4: ይህ ከዚህ በፊት Telegram `getUpdates` ይጠቀም ነበር — አሁን
+  /// getUpdates በአፑ ውስጥ የተከለከለ ነው (bot server ብቸኛ consumer ነው)።
+  /// የ Telegram chats ዝርዝር ከ server በኩል ብቻ ሊመጣ ይችላል፤ እስከዚያው
+  /// ድረስ ባዶ ዝርዝር ይመለሳል እና አስተዳዳሪው Chat ID በእጅ ማስገባት አለበት።
+  /// ከዚህ በፊት የነበረው hardcoded የግል chat fallback ተወግዷል።
   static Future<List<Map<String, dynamic>>> fetchRecentChats() async {
-    try {
-      http.Response? response;
-      try {
-        final uri = Uri.parse('$baseUrl/getUpdates');
-        response = await http.get(uri).timeout(const Duration(seconds: 6));
-      } catch (_) {
-        try {
-          final proxyUri = Uri.parse('$cloudBackendUrl/api/telegram/getUpdates?bot_token=$botToken');
-          response = await http.get(proxyUri).timeout(const Duration(seconds: 10));
-        } catch (_) {}
-      }
-
-      if (response == null || response.statusCode != 200) {
-        return [
-          {
-            'id': '1537845176',
-            'title': 'Shetesfa (የእርስዎ ቻት)',
-            'type': 'private',
-          }
-        ];
-      }
-
-      final data = jsonDecode(response.body);
-      if (data['ok'] != true || data['result'] == null) {
-        return [
-          {
-            'id': '1537845176',
-            'title': 'Shetesfa (የእርስዎ ቻት)',
-            'type': 'private',
-          }
-        ];
-      }
-
-      final List results = data['result'];
-      final Map<String, Map<String, dynamic>> uniqueChats = {};
-
-      for (var update in results) {
-        final message = update['message'] ?? update['channel_post'] ?? update['my_chat_member'];
-        if (message != null && message['chat'] != null) {
-          final chat = message['chat'];
-          final id = chat['id'].toString();
-          final title = chat['title'] ??
-              '${chat['first_name'] ?? ''} ${chat['last_name'] ?? ''}'.trim();
-          final type = chat['type'] ?? 'unknown';
-
-          uniqueChats[id] = {
-            'id': id,
-            'title': title.isEmpty ? 'ያልታወቀ ተጠቃሚ' : title,
-            'type': type,
-          };
-        }
-      }
-
-      // የእርስዎን ቻት በእርግጠኝነት ማካተት
-      if (!uniqueChats.containsKey('1537845176')) {
-        uniqueChats['1537845176'] = {
-          'id': '1537845176',
-          'title': 'Shetesfa (የእርስዎ ቻት)',
-          'type': 'private',
-        };
-      }
-
-      return uniqueChats.values.toList();
-    } catch (e) {
-      debugPrint('Telegram fetchRecentChats exception: $e');
-      return [
-        {
-          'id': '1537845176',
-          'title': 'Shetesfa (የእርስዎ ቻት)',
-          'type': 'private',
-        }
-      ];
-    }
+    debugPrint(
+      'Telegram fetchRecentChats: getUpdates is disabled in the app '
+      '(bot server is the single consumer); no chat list available. '
+      'The church admin must enter the chat ID manually.',
+    );
+    return [];
   }
 
   /// ከአፑ ወደ ቴሌግራም ግሩፕ መልእክት መላክ
@@ -700,6 +566,9 @@ class TelegramLiveMessage {
   final String time;
   final bool isFromApp;
   final bool isMe;
+  // L4: የ bot መልእክት መሆኑን የሚለይ ምልክት። Bot መልእክት `isMe`
+  // በጭራሽ መሆን የለበትም — እንደ ተጠቃሚው የላከው እንዳይታይ።
+  final bool isBot;
   final String? photoUrl;
   final Uint8List? localImageBytes;
   final String? documentName;
@@ -713,6 +582,7 @@ class TelegramLiveMessage {
     required this.time,
     required this.isFromApp,
     required this.isMe,
+    this.isBot = false,
     this.photoUrl,
     this.localImageBytes,
     this.documentName,
