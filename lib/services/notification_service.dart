@@ -140,18 +140,19 @@ class NotificationService extends ChangeNotifier {
     try {
       final android = _local.resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin>();
-      final androidGranted = android == null
-          ? true
-          : await android.requestNotificationsPermission();
+      // Both permission calls return Future<bool?> in the installed
+      // plugin version, so `?? false` coerces null to "not granted"
+      // — a nullable bool can't be used in `&&` (CI fix, round 2).
+      final androidGranted =
+          await android?.requestNotificationsPermission() ?? false;
       final ios = _local.resolvePlatformSpecificImplementation<
           IOSFlutterLocalNotificationsPlugin>();
-      final iosGranted = ios == null
-          ? true
-          : await ios.requestPermissions(
-              alert: true,
-              badge: true,
-              sound: true,
-            );
+      final iosGranted = await ios?.requestPermissions(
+            alert: true,
+            badge: true,
+            sound: true,
+          ) ??
+          false;
       return androidGranted && iosGranted;
     } catch (e) {
       debugPrint('NotificationService: permission request failed: $e');
@@ -199,10 +200,12 @@ class NotificationService extends ChangeNotifier {
         tz.TZDateTime.from(when, tz.local),
         _details,
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-        // NOTE (CI fix 2026-11-14): no
-        // `uiLocalNotificationDateInterpretation` here — that parameter
-        // (and its enum) was removed from the plugin; absolute time is
-        // the behaviour anyway.
+        // NOTE (CI fix 2026-11-14, round 2): this parameter IS required
+        // in the plugin version CI resolves (v18) — removing it broke
+        // the build (missing_required_argument). It was only removed
+        // in v19+, so it stays while pubspec pins ^18.0.0.
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
       );
     } catch (e) {
       debugPrint('NotificationService: schedule failed for "$title": $e');
