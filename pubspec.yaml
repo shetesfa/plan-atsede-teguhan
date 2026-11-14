@@ -45,6 +45,11 @@ dependencies:
   http: ^1.2.0
   path_provider: ^2.1.2
   flutter_secure_storage: ^11.2.0
+  # Local notifications (audit C5): real on-device reminders.
+  # ^18.0.0 is a real published line (18.0.1 exists on pub.dev).
+  # `flutter pub get` must still resolve it against the other deps.
+  flutter_local_notifications: ^18.0.0
+  timezone: ^0.10.0
 
 dev_dependencies:
   flutter_test:
