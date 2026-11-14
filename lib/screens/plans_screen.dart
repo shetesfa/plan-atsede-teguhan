@@ -1,10 +1,14 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models/department.dart';
 import '../models/plan_item.dart';
+import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/excel_importer.dart';
+import '../services/offline_sync_service.dart';
+import '../services/notification_service.dart';
 import '../services/telegram_service.dart';
 import '../theme/app_theme.dart';
 
@@ -31,6 +35,10 @@ class _PlansScreenState extends State<PlansScreen> {
   String selectedStatusFilter = 'all'; // 'all', 'postponed', 'reported', 'completed', 'overdue'
   bool isTableView = true;
 
+  /// M10፦ የመጨረሻው የአገልጋይ ዝርዝር-ማደስ ስህተት — "server አልተገኘም" ከ "እቅድ የለም"
+  /// ለመለየት። null ማለት ስህተት የለም ማለት ነው።
+  String? _serverError;
+
 
   @override
   void initState() {
@@ -40,6 +48,19 @@ class _PlansScreenState extends State<PlansScreen> {
       selectedDeptId = currentDept.id;
     } else if (widget.initialDepartmentId != null) {
       selectedDeptId = widget.initialDepartmentId!;
+    }
+    // C5: እቅዶች ሲጫኑ የአካባቢ ማሳሰቢያዎችን ማስያዝ (NotificationService init
+    // በ main.dart ተደርጓል፤ ካልተዘጋጀ scheduleRemindersForPlans በዝምታ ይመለሳል)።
+    NotificationService().scheduleRemindersForPlans(widget.plans);
+  }
+
+  @override
+  void didUpdateWidget(covariant PlansScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.plans != widget.plans) {
+      // C5: ወላጅ አዲስ እቅዶች ሲያመጣ ማሳሰቢያዎችን እንደገና ማስያዝ (IDs
+      // deterministic ስለሆኑ ተመሳሳይ ማሳሰቢያ አይደገምም)።
+      NotificationService().scheduleRemindersForPlans(widget.plans);
     }
   }
 
@@ -96,12 +117,264 @@ class _PlansScreenState extends State<PlansScreen> {
     }
   }
 
+  // ── H5፦ ከመስመር ውጭ ወረፋ ማመሳከር ─────────────────────────────────────────
+  // ከስኬታማ ለውጥ በኋላ ይጠራል። ስህተት ቢኖር አፕሉን በጭራሽ አያቋርጥም — ወረፋው
+  // ተቀምጦ በሚቀጥለው ስኬታማ ጥሪ ይመሳከራል።
+  Future<void> _trySyncPending() async {
+    try {
+      final result = await OfflineSyncService.syncPendingQueue('atsede_app_device');
+      debugPrint('Offline sync result: $result');
+    } catch (e) {
+      debugPrint('Offline sync failed (queue kept, will retry later): $e');
+    }
+  }
+
+  // ── M10፦ እቅዶችን ከአገልጋዩ እንደገና ማምጣት ───────────────────────────────────
+  // fetchPlans() ስህተት ሲጥል "server አልተገኘም" እንጂ "እቅድ የለም" አይባልም።
+  Future<bool> _refreshPlansFromServer() async {
+    try {
+      final remoteData = await ApiService().fetchPlans();
+      if (!mounted) return false;
+      setState(() => _serverError = null);
+      final fetchedPlans =
+          remoteData.map((d) => PlanItem.fromDbJson(d)).toList();
+      widget.onImportNewPlans(fetchedPlans);
+      // C5: ለተገኙት እቅዶች የአካባቢ ማሳሰቢያ ማስያዝ።
+      NotificationService().scheduleRemindersForPlans(fetchedPlans);
+      return true;
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _serverError = e.message);
+      return false;
+    } catch (e) {
+      if (mounted) setState(() => _serverError = e.toString());
+      return false;
+    }
+  }
+
+  // ── H1(a)፦ አዲስ እቅድ መፍጠሪያ ሞዳል ────────────────────────────────────────
+  void _showCreatePlanDialog() {
+    final titleController = TextEditingController();
+    final descController = TextEditingController();
+    final execTimeController = TextEditingController();
+    final isSuper = AuthService.isSuperAdmin;
+    final currentDept = AuthService.currentDepartment;
+    // ጽ/ቤት ካልሆነ እቅዱ ለራሱ ክፍል ብቻ ነው የሚፈጠረው (አገልጋዩም ያንኑ ያስገድዳል)።
+    final deptChoices = isSuper
+        ? Department.allDepartments.where((d) => !d.isSuperAdmin).toList()
+        : (currentDept != null ? [currentDept] : <Department>[]);
+    Department? selectedDept = deptChoices.isNotEmpty ? deptChoices.first : null;
+    bool isSubmitting = false;
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Row(
+                children: [
+                  Icon(Icons.add_task, color: AppTheme.primaryMaroon),
+                  SizedBox(width: 8),
+                  Text('አዲስ እቅድ', style: TextStyle(fontSize: 16)),
+                ],
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('የእቅዱ ርዕስ / ዋና ተግባር፦', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: titleController,
+                      decoration: const InputDecoration(
+                        hintText: 'ለምሳሌ፦ የመዝሙር ስልጠና ለአባላት',
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.all(10),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text('ክፍል፦', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    const SizedBox(height: 6),
+                    DropdownButtonFormField<Department>(
+                      value: selectedDept,
+                      decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 10)),
+                      items: deptChoices
+                          .map((d) => DropdownMenuItem(value: d, child: Text(d.name, style: const TextStyle(fontSize: 13))))
+                          .toList(),
+                      onChanged: isSuper ? (d) => setDialogState(() => selectedDept = d) : null,
+                    ),
+                    const SizedBox(height: 12),
+                    const Text('የማስፈጸሚያ ጊዜ / ቀን፦', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: execTimeController,
+                      decoration: const InputDecoration(
+                        hintText: 'ለምሳሌ፦ ህዳር 15',
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.all(10),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text('ዝርዝር መግለጫ፦', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: descController,
+                      maxLines: 3,
+                      decoration: const InputDecoration(
+                        hintText: 'እቅዱ ምን እንደሚያካትት በዝርዝር ይጻፉ...',
+                        border: OutlineInputBorder(),
+                        contentPadding: EdgeInsets.all(10),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('ይቅር'),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryMaroon, foregroundColor: Colors.white),
+                  onPressed: isSubmitting
+                      ? null
+                      : () async {
+                          final title = titleController.text.trim();
+                          if (title.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('እባክዎን የእቅዱን ርዕስ ያስገቡ!'), backgroundColor: Colors.red),
+                            );
+                            return;
+                          }
+                          if (selectedDept == null) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('ክፍል አልተመረጠም!'), backgroundColor: Colors.red),
+                            );
+                            return;
+                          }
+                          setDialogState(() => isSubmitting = true);
+
+                          final payload = <String, dynamic>{
+                            'department_id': selectedDept!.id,
+                            'main_task': title,
+                            'title': title,
+                            'detail_task': descController.text.trim(),
+                            'description': descController.text.trim(),
+                            'execution_time': execTimeController.text.trim(),
+                            'target_date': execTimeController.text.trim(),
+                            'measurement': '',
+                            'quantity': '',
+                            'budget': '',
+                            'remarks': '',
+                            'progress_percent': 0,
+                          };
+
+                          final result = await ApiService().savePlan(payload);
+                          if (!context.mounted) return;
+                          Navigator.pop(ctx);
+
+                          if (result['success'] == true) {
+                            await _refreshPlansFromServer();
+                            await _trySyncPending();
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('አዲስ እቅድ በአገልጋዩ ላይ በተሳካ ሁኔታ ተመዝግቧል!'),
+                                  backgroundColor: AppTheme.greenSuccess,
+                                ),
+                              );
+                            }
+                          } else {
+                            // አገልጋዩ ካልተገኘ እቅዱ ከመስመር ውጭ ወረፋ ውስጥ ይቀመጣል — ሐሰተኛ
+                            // "ተመዝግቧል" መልእክት በጭራሽ አይታይም (H1/H5)።
+                            await OfflineSyncService.enqueueChange(
+                              entityType: 'plan',
+                              action: 'insert',
+                              data: payload,
+                              departmentId: selectedDept!.id,
+                            );
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('አገልጋዩ አልተገኘም — እቅዱ ከመስመር ውጭ ተቀምጧል፤ ኢንተርኔት ሲገኝ በራስ-ሰር ይላካል። (${result['message'] ?? ''})'),
+                                  backgroundColor: Colors.orange.shade800,
+                                  duration: const Duration(seconds: 5),
+                                ),
+                              );
+                            }
+                          }
+                        },
+                  child: isSubmitting
+                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : const Text('እቅዱን መዝግብ'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // ── H1(b)፦ እቅድ መሰረዣ (በማረጋገጫ) ────────────────────────────────────────
+  Future<void> _deletePlan(PlanItem item) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('እቅዱን መሰረዝ ይፈልጋሉ?', style: TextStyle(fontSize: 16)),
+        content: Text(
+          '«${item.detailTask.isNotEmpty ? item.detailTask : item.mainTask}»\n\nይህ እቅድ ከአገልጋዩ ላይ በቋሚነት ይሰረዛል።',
+          style: const TextStyle(fontSize: 13),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('ይቅር')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.redDanger),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('አዎ፣ ሰርዝ', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+
+    final ok = await ApiService().deletePlan(item.id);
+    if (!mounted) return;
+
+    if (ok) {
+      widget.onImportNewPlans(widget.plans.where((p) => p.id != item.id).toList());
+      await _trySyncPending();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('እቅዱ ከአገልጋዩ ላይ ተሰርዟል።'), backgroundColor: AppTheme.greenSuccess),
+      );
+    } else {
+      // መሰረዙ ካልተሳካ ለውጡ ከመስመር ውጭ ወረፋ ውስጥ ይቀመጣል፤ እቅዱ በአካባቢው አይጠፋም።
+      await OfflineSyncService.enqueueChange(
+        entityType: 'plan',
+        action: 'delete',
+        data: {'id': item.id},
+        departmentId: item.departmentId,
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('አገልጋዩ አልተገኘም — የመሰረዝ ጥያቄው ከመስመር ውጭ ተቀምጧል፤ ኢንተርኔት ሲገኝ ይላካል።'),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 5),
+        ),
+      );
+    }
+  }
+
   // 1. የክንውን ሪፖርት ማቅረቢያ ሞዳል (የተሰራበትን እና ያልተሰራበትን ምክንያት በዝርዝር መመዝገቢያ)
   void _showReportDialog(PlanItem item) {
     int currentPercent = item.progressPercent;
     final doneController = TextEditingController(text: item.reportDetails ?? '');
     final notDoneController = TextEditingController(text: item.notDoneDetails ?? item.reason);
     String? pickedImagePath = item.evidencePath;
+    // በዚህ ክፍለ-ጊዜ የተመረጠ ፎቶ (XFile.readAsBytes() በሁሉም platform ይሰራል —
+    // dart:io File መጠቀም በ web ላይ አይሰራም)።
+    Uint8List? pickedImageBytes;
     bool isSubmitting = false;
 
     showModalBottomSheet(
@@ -255,7 +528,11 @@ class _PlansScreenState extends State<PlansScreen> {
                             final picker = ImagePicker();
                             final img = await picker.pickImage(source: ImageSource.gallery);
                             if (img != null) {
-                              setModalState(() => pickedImagePath = img.path);
+                              final bytes = await img.readAsBytes();
+                              setModalState(() {
+                                pickedImagePath = img.path;
+                                pickedImageBytes = bytes;
+                              });
                             }
                           },
                           icon: const Icon(Icons.add_a_photo, size: 16),
@@ -298,11 +575,36 @@ class _PlansScreenState extends State<PlansScreen> {
                                 final senderTitle = isSuper
                                     ? 'የጽ/ቤት ዋና ጸሐፊ'
                                     : '${currentDept?.shortName ?? item.departmentName} ኃላፊ';
+                                final doneDetails = doneController.text.trim();
+                                final notDoneDetails = notDoneController.text.trim();
+                                final taskTitle = item.detailTask.isNotEmpty ? item.detailTask : item.mainTask;
 
+                                // H1(c)፦ ሪፖርቱ መጀመሪያ ወደ አገልጋዩ (reports.php) ይላካል።
+                                // "ተመዝግቧል" የሚለው መልእክት የሚታየው አገልጋዩ ካረጋገጠ በኋላ ብቻ ነው።
+                                final reportPayload = <String, dynamic>{
+                                  'plan_id': item.id,
+                                  'department_id': item.departmentId,
+                                  'title': taskTitle,
+                                  // reports.php የተከናወነ ዝርዝር ባዶ ከሆነ 400 ይመልሳል፤
+                                  // ስለዚህ ባዶ ከሆነ የአፈፃፀም ደረጃውን እንደ ማብራሪያ እንልካለን።
+                                  'activities_completed': doneDetails.isNotEmpty
+                                      ? doneDetails
+                                      : 'የአፈፃፀም ደረጃ፦ $currentPercent%',
+                                  'progress_percent': currentPercent,
+                                  'challenges': notDoneDetails,
+                                  'solutions_proposed': '',
+                                  'status': 'submitted',
+                                };
+
+                                final result = await ApiService().submitReport(reportPayload);
+                                final submitted = result['success'] == true;
+
+                                // የአካባቢው ሁኔታ በሁለቱም መንገድ ይዘምናል (በስክሪኑ ላይ ይታይ) —
+                                // ግን የስኬት መልእክቱ የሚወሰነው በአገልጋዩ መልስ ብቻ ነው።
                                 item.progressPercent = currentPercent;
-                                item.reportDetails = doneController.text.trim();
-                                item.notDoneDetails = notDoneController.text.trim();
-                                item.reason = notDoneController.text.trim();
+                                item.reportDetails = doneDetails;
+                                item.notDoneDetails = notDoneDetails;
+                                item.reason = notDoneDetails;
                                 item.evidencePath = pickedImagePath;
                                 item.reportSubmittedAt = DateTime.now();
                                 item.submittedBy = senderTitle;
@@ -310,24 +612,60 @@ class _PlansScreenState extends State<PlansScreen> {
 
                                 widget.onUpdatePlan(item);
 
-                                // ወደ ቴሌግራም ግሩፕ በቀጥታ ይፋዊ ማሳወቂያ መላክ
-                                await TelegramService.sendPlanReportNotice(
-                                  deptName: item.departmentName,
-                                  senderTitle: senderTitle,
-                                  taskTitle: item.detailTask.isNotEmpty ? item.detailTask : item.mainTask,
-                                  progressPercent: currentPercent,
-                                  doneDetails: item.reportDetails ?? '',
-                                  notDoneDetails: item.notDoneDetails,
-                                );
-
-                                if (context.mounted) {
-                                  Navigator.pop(context);
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('ሪፖርቱ ለጽ/ቤት ተመዝግቧል፤ ወደ ቴሌግራም ግሩፕም ተልኳል!'),
-                                      backgroundColor: AppTheme.greenSuccess,
-                                    ),
+                                if (submitted) {
+                                  // ወደ ቴሌግራም ግሩፕ ይፋዊ ማሳወቂያ መላክ
+                                  await TelegramService.sendPlanReportNotice(
+                                    deptName: item.departmentName,
+                                    senderTitle: senderTitle,
+                                    taskTitle: taskTitle,
+                                    progressPercent: currentPercent,
+                                    doneDetails: doneDetails,
+                                    notDoneDetails: notDoneDetails.isEmpty ? null : notDoneDetails,
                                   );
+
+                                  // H1(d)፦ የፎቶ ማስረጃ ከተያያዘ ወደ ቴሌግራም ይላካል
+                                  if (pickedImageBytes != null) {
+                                    try {
+                                      await TelegramService.sendPhoto(
+                                        imageBytes: pickedImageBytes!,
+                                        fileName: 'evidence_${item.id}.jpg',
+                                        caption: '📷 የ«$taskTitle» ሪፖርት ማስረጃ — $currentPercent%',
+                                      );
+                                    } catch (e) {
+                                      debugPrint('Evidence photo send failed: $e');
+                                    }
+                                  }
+
+                                  await _trySyncPending();
+
+                                  if (context.mounted) {
+                                    Navigator.pop(context);
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('ሪፖርቱ ለጽ/ቤት ተመዝግቧል፤ ወደ ቴሌግራም ግሩፕም ተልኳል!'),
+                                        backgroundColor: AppTheme.greenSuccess,
+                                      ),
+                                    );
+                                  }
+                                } else {
+                                  // አገልጋዩ ካልተገኘ ሪፖርቱ ከመስመር ውጭ ወረፋ ውስጥ ይቀመጣል
+                                  // እና ሐሰተኛ "ተመዝግቧል" መልእክት በጭራሽ አይታይም (H1/H5)።
+                                  await OfflineSyncService.enqueueChange(
+                                    entityType: 'report',
+                                    action: 'insert',
+                                    data: reportPayload,
+                                    departmentId: item.departmentId,
+                                  );
+                                  if (context.mounted) {
+                                    Navigator.pop(context);
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('አገልጋዩ አልተገኘም — ሪፖርቱ ከመስመር ውጭ ተቀምጧል፤ ኢንተርኔት ሲገኝ በራስ-ሰር ይላካል። (${result['message'] ?? ''})'),
+                                        backgroundColor: Colors.orange.shade800,
+                                        duration: const Duration(seconds: 5),
+                                      ),
+                                    );
+                                  }
                                 }
                               },
                         icon: isSubmitting
@@ -535,31 +873,76 @@ class _PlansScreenState extends State<PlansScreen> {
                                 final senderTitle = isSuper
                                     ? 'የጽ/ቤት ዋና ጸሐፊ'
                                     : '${currentDept?.shortName ?? item.departmentName} ኃላፊ';
+                                final postponeReason = reasonController.text.trim();
+
+                                // H1(e)፦ ማስተላለፉ መጀመሪያ ወደ አገልጋዩ (plans.php) ይቀመጣል።
+                                // plans.php ያለውን እቅድ ሲያሻሽል ሁሉንም መስኮች ስለሚተካ
+                                // ያሉትን እሴቶች ሁሉ እንልካለን — አለበለዚያ ይጠፋሉ።
+                                final planPayload = <String, dynamic>{
+                                  'id': item.id,
+                                  'department_id': item.departmentId,
+                                  'sub_department': item.subDepartment,
+                                  'main_task': item.mainTask,
+                                  'detail_task': item.detailTask,
+                                  'measurement': item.measurement,
+                                  'quantity': item.quantity,
+                                  'execution_time': newDate,
+                                  'target_date': newDate,
+                                  'budget': item.budget,
+                                  'remarks': postponeReason.isNotEmpty ? postponeReason : item.remarks,
+                                  'progress_percent': item.progressPercent,
+                                };
+
+                                final result = await ApiService().savePlan(planPayload);
+                                final saved = result['success'] == true;
 
                                 item.postponedDate = newDate;
-                                item.postponeReason = reasonController.text.trim();
+                                item.postponeReason = postponeReason;
                                 item.updatedAt = DateTime.now();
 
                                 widget.onUpdatePlan(item);
 
-                                // ወደ ቴሌግራም ግሩፕ ማሳወቂያ መላክ
-                                await TelegramService.sendPlanPostponedNotice(
-                                  deptName: item.departmentName,
-                                  senderTitle: senderTitle,
-                                  taskTitle: item.detailTask.isNotEmpty ? item.detailTask : item.mainTask,
-                                  originalDate: item.executionTime,
-                                  newDate: newDate,
-                                  reason: item.postponeReason ?? 'ምክንያት አልተገለጸም',
-                                );
-
-                                if (context.mounted) {
-                                  Navigator.pop(context);
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text('እቅዱ ወደ $newDate ተላልፏል፤ ለጽ/ቤት እና ቴሌግራም ተልኳል!'),
-                                      backgroundColor: AppTheme.greenSuccess,
-                                    ),
+                                if (saved) {
+                                  // ወደ ቴሌግራም ግሩፕ ማሳወቂያ መላክ
+                                  await TelegramService.sendPlanPostponedNotice(
+                                    deptName: item.departmentName,
+                                    senderTitle: senderTitle,
+                                    taskTitle: item.detailTask.isNotEmpty ? item.detailTask : item.mainTask,
+                                    originalDate: item.executionTime,
+                                    newDate: newDate,
+                                    reason: postponeReason.isNotEmpty ? postponeReason : 'ምክንያት አልተገለጸም',
                                   );
+
+                                  await _trySyncPending();
+
+                                  if (context.mounted) {
+                                    Navigator.pop(context);
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('እቅዱ ወደ $newDate ተላልፏል፤ ለጽ/ቤት እና ቴሌግራም ተልኳል!'),
+                                        backgroundColor: AppTheme.greenSuccess,
+                                      ),
+                                    );
+                                  }
+                                } else {
+                                  // አገልጋዩ ካልተገኘ ማስተላለፉ ከመስመር ውጭ ወረፋ ውስጥ ይቀመጣል፤
+                                  // ሐሰተኛ "ተላልፏል" መልእክት በጭራሽ አይታይም።
+                                  await OfflineSyncService.enqueueChange(
+                                    entityType: 'plan',
+                                    action: 'update',
+                                    data: planPayload,
+                                    departmentId: item.departmentId,
+                                  );
+                                  if (context.mounted) {
+                                    Navigator.pop(context);
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('አገልጋዩ አልተገኘም — ማስተላለፉ ከመስመር ውጭ ተቀምጧል፤ ኢንተርኔት ሲገኝ ይላካል። (${result['message'] ?? ''})'),
+                                        backgroundColor: Colors.orange.shade800,
+                                        duration: const Duration(seconds: 5),
+                                      ),
+                                    );
+                                  }
                                 }
                               },
                         icon: isSubmitting
@@ -597,6 +980,11 @@ class _PlansScreenState extends State<PlansScreen> {
             icon: Icon(isTableView ? Icons.grid_view : Icons.table_chart),
             tooltip: isTableView ? 'ወደ ካርድ እይታ ቀይር' : 'ወደ ሰንጠረዥ እይታ ቀይር',
             onPressed: () => setState(() => isTableView = !isTableView),
+          ),
+          IconButton(
+            icon: const Icon(Icons.add_task),
+            tooltip: 'አዲስ እቅድ',
+            onPressed: _showCreatePlanDialog,
           ),
           if (isSuper)
             IconButton(
@@ -660,10 +1048,44 @@ class _PlansScreenState extends State<PlansScreen> {
           ),
           const Divider(height: 1),
 
-          // ይዘት
+          // ይዘት — M10፦ አገልጋዩ ካልተገኘ "እቅድ የለም" ሳይሆን "server አልተገኘም" ይታያል
           Expanded(
             child: filteredPlans.isEmpty
-                ? const Center(child: Text('በተመረጠው መስፈርት መሰረት ምንም እቅድ አልተገኘም'))
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _serverError != null ? Icons.cloud_off : Icons.inbox_outlined,
+                            size: 40,
+                            color: _serverError != null ? Colors.red.shade400 : Colors.grey,
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            _serverError != null
+                                ? 'አገልጋዩ አልተገኘም፦ $_serverError'
+                                : 'በተመረጠው መስፈርት መሰረት ምንም እቅድ አልተገኘም',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                          if (_serverError != null) ...[
+                            const SizedBox(height: 12),
+                            ElevatedButton.icon(
+                              onPressed: _refreshPlansFromServer,
+                              icon: const Icon(Icons.refresh, size: 16),
+                              label: const Text('እንደገና ሞክር'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppTheme.primaryMaroon,
+                                foregroundColor: Colors.white,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  )
                 : (isTableView ? _buildExcelTableView() : _buildCardsView()),
           ),
         ],
@@ -813,6 +1235,11 @@ class _PlansScreenState extends State<PlansScreen> {
                         icon: const Icon(Icons.update, size: 18, color: Colors.deepOrange),
                         tooltip: 'እቅድ አስተላልፍ (ቀን ቀይር)',
                         onPressed: () => _showPostponeDialog(item),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                        tooltip: 'እቅድ ሰርዝ',
+                        onPressed: () => _deletePlan(item),
                       ),
                     ],
                   ),
@@ -1026,6 +1453,11 @@ class _PlansScreenState extends State<PlansScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
+                    IconButton(
+                      onPressed: () => _deletePlan(item),
+                      icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                      tooltip: 'እቅድ ሰርዝ',
+                    ),
                     TextButton.icon(
                       onPressed: () => _showPostponeDialog(item),
                       icon: const Icon(Icons.update, size: 15, color: Colors.deepOrange),
