@@ -129,20 +129,29 @@ class NotificationService extends ChangeNotifier {
 
   /// Asks the OS for notification permission (Android 13+ / iOS).
   /// Returns true when permission is granted (or not required).
+  ///
+  /// NOTE (CI fix 2026-11-14): the iOS plugin class is
+  /// [IOSFlutterLocalNotificationsPlugin] — there is no
+  /// `DarwinFlutterLocalNotificationsPlugin` type (the `Darwin` prefix
+  /// applies to the settings/details classes only). Using the Darwin
+  /// name made `flutter analyze` fail. See the package README, which
+  /// uses `IOSFlutterLocalNotificationsPlugin` for iOS.
   Future<bool> requestPermission() async {
     try {
       final android = _local.resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin>();
-      final androidGranted =
-          await android?.requestNotificationsPermission() ?? true;
+      final androidGranted = android == null
+          ? true
+          : await android.requestNotificationsPermission();
       final ios = _local.resolvePlatformSpecificImplementation<
-          DarwinFlutterLocalNotificationsPlugin>();
-      final iosGranted = await ios?.requestPermissions(
-            alert: true,
-            badge: true,
-            sound: true,
-          ) ??
-          true;
+          IOSFlutterLocalNotificationsPlugin>();
+      final iosGranted = ios == null
+          ? true
+          : await ios.requestPermissions(
+              alert: true,
+              badge: true,
+              sound: true,
+            );
       return androidGranted && iosGranted;
     } catch (e) {
       debugPrint('NotificationService: permission request failed: $e');
@@ -190,8 +199,10 @@ class NotificationService extends ChangeNotifier {
         tz.TZDateTime.from(when, tz.local),
         _details,
         androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-        uiLocalNotificationDateInterpretation:
-            UILocalNotificationDateInterpretation.absoluteTime,
+        // NOTE (CI fix 2026-11-14): no
+        // `uiLocalNotificationDateInterpretation` here — that parameter
+        // (and its enum) was removed from the plugin; absolute time is
+        // the behaviour anyway.
       );
     } catch (e) {
       debugPrint('NotificationService: schedule failed for "$title": $e');
