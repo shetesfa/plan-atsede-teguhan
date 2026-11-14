@@ -1,3 +1,17 @@
+# Atsede Teguhan -- Render blueprint (2026-11-14 fix branch)
+# ------------------------------------------------------------------
+# What lives here:
+#   1. atsede-telegram-bot  -- the EXISTING Python bot service
+#      (plan-atsede-teguhan.onrender.com). Keep it; do not recreate it.
+#   2. plan-atsede-php-api  -- NEW Docker PHP service for the PHP API
+#      (alternative deploy path; 42web is the PREFERRED path -- see
+#      docs/DEPLOY.md). Render has no free MySQL, so this service needs
+#      an EXTERNAL MySQL (e.g. the 42web database) via DB_HOST.
+#   3. atsede-reminder-scheduler -- NEW daily cron running the reminder
+#      scheduler once a day at 06:00 (Africa/Addis_Ababa is UTC+3, so
+#      06:00 EAT = 03:00 UTC; Render cron schedules use UTC).
+# No secret VALUES in this file -- every secret is `sync: false` and is
+# set in the Render Dashboard only.
 services:
   - type: web
     name: atsede-telegram-bot
@@ -9,7 +23,46 @@ services:
         sync: false # Set securely in Render Dashboard (Never put secret tokens in repository)
       - key: CHAT_ID
         sync: false
+      - key: BOT_PROXY_SECRET
+        sync: false # NEW (H2): shared secret the Flutter app sends as header X-Bot-Proxy-Secret on every bot-proxy call. Set a long random value in Render AND in the app config. Never commit the value.
       - key: PORT
         value: 10000
       - key: PHP_API_BASE
+        sync: false # Set once the PHP API is hosted, e.g. https://<42web domain>/api (no trailing slash, no spaces). Leave unset to keep serving the static plans file.
+
+  - type: web
+    name: plan-atsede-php-api
+    runtime: docker
+    # The Dockerfile lives at api/Dockerfile (repo root). This service
+    # runs from the repo root so the Docker build context contains api/.
+    rootDir: .
+    dockerfilePath: ./api/Dockerfile
+    dockerContext: .
+    plan: free
+    envVars:
+      - key: DB_HOST
+        sync: false # MySQL host -- Render has no free MySQL; use an external host (e.g. the 42web MySQL hostname)
+      - key: DB_USER
         sync: false
+      - key: DB_PASS
+        sync: false # NOTE: api/config.php reads DB_PASS (not DB_PASSWORD)
+      - key: DB_NAME
+        sync: false
+      - key: JWT_SECRET
+        sync: false # Must be at least 32 characters; the API refuses to start without it
+      - key: APP_ENV
+        value: production
+
+  - type: cron
+    name: atsede-reminder-scheduler
+    schedule: "0 3 * * *"
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python reminder_scheduler.py --once
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false # Required: the chat/group the daily reminder goes to
+      - key: PHP_API_BASE
+        sync: false # Optional: set once the PHP API is hosted; unset = static plans file

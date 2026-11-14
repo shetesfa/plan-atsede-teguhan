@@ -235,14 +235,26 @@ class _DocumentEditorScreenState extends State<DocumentEditorScreen>
       };
 
       final messenger = ScaffoldMessenger.of(context);
-      await ApiService().savePlan(payload);
+      // M12፦ ሰነዶች ወደ documents.php ይላካሉ (ወደ plans.php አይደሉም) እና ውጤቱ
+      // ከመፈተሹ በፊት "ተቀምጧል" መልእክት አይታይም።
+      final result = await ApiService().saveDocument(payload);
       if (mounted) {
-        messenger.showSnackBar(
-          const SnackBar(
-            content: Text('ሰነዱ በማህደር በተሳካ ሁኔታ ተቀምጧል!'),
-            backgroundColor: AppTheme.greenSuccess,
-          ),
-        );
+        if (result['success'] == true) {
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text('ሰነዱ በማህደር በተሳካ ሁኔታ ተቀምጧል!'),
+              backgroundColor: AppTheme.greenSuccess,
+            ),
+          );
+        } else {
+          messenger.showSnackBar(
+            SnackBar(
+              content: Text('ሰነዱን ማስቀመጥ አልተቻለም፦ ${result['message'] ?? 'ያልታወቀ ስህተት'}'),
+              backgroundColor: AppTheme.redDanger,
+              duration: const Duration(seconds: 5),
+            ),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {

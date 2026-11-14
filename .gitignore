@@ -50,5 +50,12 @@ backend/__pycache__/
 .env
 *.env
 api/.env
+# Audit L2: keystores must never be committed (release signing, M3).
+*.jks
+*.keystore
+key.properties
+android/key.properties
+# Build outputs (Flutter/Dart already covers /build/; be explicit).
+/build/
 backup_pre_improvement/
 

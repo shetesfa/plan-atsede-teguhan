@@ -28,6 +28,30 @@ function loadEnvFile(string $filePath): void {
 loadEnvFile(__DIR__ . '/.env');
 loadEnvFile(__DIR__ . '/../.env');
 
+// 2a. getallheaders() polyfill (audit L5): the function only exists under
+// Apache/mod_php and some SAPIs. Under php-fpm / nginx / CLI server it
+// is undefined and calling it is a fatal error. Define it from $_SERVER
+// when missing, so api/config.php (and any file that includes it) works
+// on any SAPI. NOTE: api/files.php and api/auth.php call getallheaders()
+// directly and do NOT include config.php first — they still need the
+// same guard (parent to handle / note).
+if (!function_exists('getallheaders')) {
+    function getallheaders(): array {
+        $headers = [];
+        foreach ($_SERVER as $name => $value) {
+            if (str_starts_with($name, 'HTTP_')) {
+                $header = str_replace(' ', '-', ucwords(strtolower(str_replace('_', ' ', substr($name, 5)))));
+                $headers[$header] = $value;
+            } elseif ($name === 'CONTENT_TYPE') {
+                $headers['Content-Type'] = $value;
+            } elseif ($name === 'CONTENT_LENGTH') {
+                $headers['Content-Length'] = $value;
+            }
+        }
+        return $headers;
+    }
+}
+
 // 3. ወጥ የሆኑ የ JSON ምላሽ ረዳቶች
 function jsonResponse($data, int $statusCode = 200): void {
     http_response_code($statusCode);
@@ -54,7 +78,10 @@ function jsonError(string $message, int $statusCode = 400, $errors = null): void
 }
 
 // 4. የተፈቀደ የ CORS ጥበቃ (Restricted Trusted Origins Only — Never use '*')
-$allowedOriginsStr = getenv('ALLOWED_ORIGINS') ?: 'http://localhost:3000,http://127.0.0.1:8000,http://localhost:8080,http://127.0.0.1:8080,http://localhost:8085,http://127.0.0.1:8085,http://localhost:5000,http://127.0.0.1:5000,http://127.0.0.1';
+// Audit M7: production web origin is allowed by default, and the list
+// can be overridden with the ALLOWED_ORIGINS env var (comma-separated).
+// Never put secrets here — origins only.
+$allowedOriginsStr = getenv('ALLOWED_ORIGINS') ?: 'http://localhost:3000,http://127.0.0.1:8000,http://localhost:8080,http://127.0.0.1:8080,http://localhost:8085,http://127.0.0.1:8085,http://localhost:5000,http://127.0.0.1:5000,http://127.0.0.1,https://plan-atsede-teguhan.onrender.com';
 $allowedOrigins = array_filter(array_map('trim', explode(',', $allowedOriginsStr)));
 
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';

@@ -16,21 +16,19 @@ class LetterGeneratorScreen extends StatefulWidget {
 class _LetterGeneratorScreenState extends State<LetterGeneratorScreen> {
   final _formKey = GlobalKey<FormState>();
 
+  // Audit M8: all fields start EMPTY. The old code pre-filled a real
+  // dated letter about the library (a named recipient, full
+  // body/remarks), which could be sent by accident with stale content.
   String senderDept = 'ትምህርት እና ስልጠና ክፍል';
-  final dateController = TextEditingController(text: '18/01/2019 ዓ.ም');
-  final recipientNameController = TextEditingController(text: 'ለዲ/ን ያብስራ');
-  final recipientDeptController = TextEditingController(text: 'መዝሙር እና ስነጥበብ ክፍል');
-  final subjectController = TextEditingController(
-      text: 'ቤተ-መፅሐፍትን በአግባቡ ስለመጠቀምና ይፋዊ ደብዳቤ ስለማስገባት ይመለከታል፤');
-  final bodyController = TextEditingController(
-      text:
-          'የክፍላችን ቤተ-መፅሐፍት ንብረቶች፣ መጻሕፍትና ቁሳቁሶች በተገቢው ሥርዓትና ኃላፊነት እንዲያገለግሉ እንዲሁም የአገልግሎት አሰጣጡን ግልፅና ተጠያቂነት የሰፈነበት ለማድረግ የአሰራር ደንብ ተዘጋጅቶ ተግባራዊ እየተደረገ ይገኛል።\n\nበመሆኑም ከዛሬ 18/01/2019 ዓ.ም ጀምሮ ከዚህ በኋላ ባለህ ማንኛውም አገልግሎት ቤተ-መፅሐፍቱን ለመጠቀም በቅድሚያ የግድ ይፋዊ ደብዳቤ ማስገባት እንዳለብህ እናሳስባለን። ይፋዊ ደብዳቤ ሳታስገባ ቤተ-መፅሐፍቱን መጠቀም የማትችል መሆኑን በጥብቅ እንገልፃለን።');
-  final remarksController = TextEditingController(
-      text:
-          'ለሚቀጥለው አርብ ለተያዘው ፕሮግራማችሁም ጨምሮ አስፈላጊውን የፈቃድ ደብዳቤ በቸልተኝነት የማታስገባ ከሆነ ቤተ-መፅሐፍቱን በፍፁም የማናስረክብህ መሆኑን በጥብቅ እያሳወቅን፤ አስቀድመህ ደብዳቤህን እንድታስገባ እናሳስባለን።');
-  final signeeNameController = TextEditingController(text: 'ተስፋሁን ባይህ');
-  final signeeTitleController = TextEditingController(text: 'የትምህርት እና ስልጠና ክፍል ኃላፊ');
-  final ccController = TextEditingController(text: 'ለሰንበት ትምህርት ቤቱ ጽ/ቤት, ለቤተ-መፅሐፍት ንዑስ ክፍል');
+  final dateController = TextEditingController();
+  final recipientNameController = TextEditingController();
+  final recipientDeptController = TextEditingController();
+  final subjectController = TextEditingController();
+  final bodyController = TextEditingController();
+  final remarksController = TextEditingController();
+  final signeeNameController = TextEditingController();
+  final signeeTitleController = TextEditingController();
+  final ccController = TextEditingController();
 
   bool isGenerating = false;
 
@@ -211,17 +209,17 @@ class _LetterGeneratorScreenState extends State<LetterGeneratorScreen> {
               const SizedBox(height: 14),
 
               // ቀን
-              _buildTextField('ቀን (Date)፡', dateController),
+              _buildTextField('ቀን (Date)፡', dateController, hint: 'ቀን/ወር/ዓመት ዓ.ም'),
               const SizedBox(height: 14),
 
               // ተቀባይ
-              _buildTextField('ለማን (የተቀባይ ስም)፡', recipientNameController),
+              _buildTextField('ለማን (የተቀባይ ስም)፡', recipientNameController, hint: 'የተቀባይ ስም እዚህ ያስገቡ'),
               const SizedBox(height: 14),
-              _buildTextField('የተቀባይ ክፍል / አገልግሎት፡', recipientDeptController),
+              _buildTextField('የተቀባይ ክፍል / አገልግሎት፡', recipientDeptController, hint: 'የተቀባይ ክፍል እዚህ ያስገቡ'),
               const SizedBox(height: 14),
 
               // ጉዳዩ
-              _buildTextField('ጉዳዩ (Subject)፡', subjectController),
+              _buildTextField('ጉዳዩ (Subject)፡', subjectController, hint: 'የደብዳቤው ጉዳይ እዚህ ያስገቡ'),
               const SizedBox(height: 14),
 
               // ዝርዝር መልዕክት
@@ -256,15 +254,15 @@ class _LetterGeneratorScreenState extends State<LetterGeneratorScreen> {
               // ፈራሚ
               Row(
                 children: [
-                  Expanded(child: _buildTextField('የኃላፊው ስም፡', signeeNameController)),
+                  Expanded(child: _buildTextField('የኃላፊው ስም፡', signeeNameController, hint: 'ስም')),
                   const SizedBox(width: 10),
-                  Expanded(child: _buildTextField('የኃላፊነት ማዕረግ፡', signeeTitleController)),
+                  Expanded(child: _buildTextField('የኃላፊነት ማዕረግ፡', signeeTitleController, hint: 'ማዕረግ')),
                 ],
               ),
               const SizedBox(height: 14),
 
               // ግልባጭ
-              _buildTextField('ግልባጭ (cc) - በኮማ ይለዩ፡', ccController),
+              _buildTextField('ግልባጭ (cc) - በኮማ ይለዩ፡', ccController, hint: 'ለምሳሌ፦ ለሰንበት ትምህርት ቤቱ ጽ/ቤት'),
               const SizedBox(height: 24),
 
               // የ PDF ማመንጫ አዝራር
@@ -308,7 +306,7 @@ class _LetterGeneratorScreenState extends State<LetterGeneratorScreen> {
     );
   }
 
-  Widget _buildTextField(String label, TextEditingController controller) {
+  Widget _buildTextField(String label, TextEditingController controller, {String? hint}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -316,9 +314,10 @@ class _LetterGeneratorScreenState extends State<LetterGeneratorScreen> {
         const SizedBox(height: 6),
         TextFormField(
           controller: controller,
-          decoration: const InputDecoration(
-            border: OutlineInputBorder(),
-            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: InputDecoration(
+            hintText: hint,
+            border: const OutlineInputBorder(),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           ),
           validator: (val) => val == null || val.isEmpty ? 'ይህ ሜዳ መሞላት አለበት' : null,
         ),

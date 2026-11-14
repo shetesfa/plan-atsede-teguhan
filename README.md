@@ -68,27 +68,45 @@
 
 ## 🛠️ የመጫኛ እና የማስኬጃ መመሪያዎች (Setup & Deployment)
 
+> **⚠️ የማሰማሪያ ሁኔታ፦** የ Python Telegram bot አገልግሎት በ Render ላይ ያለው የተስፋ ነባር አገልግሎት ነው —
+> ይቆያል። **የ PHP API እና MySQL ዳታቤዝ ግን እስካሁን የትም አልተጫኑም** — ከባዶ መጫን አለባቸው
+> (42web / InfinityFree ተመራጭ፤ አማራጭ፦ Render Docker PHP service)። PHP + MySQL እስኪጫኑ ድረስ
+> አፕሉ ከአካባቢው (local) አገልጋይ ጋር ብቻ ይሰራል። ደረጃ በደረጃ የማሰማሪያ መመሪያ፦ `docs/DEPLOY.md` ይመልከቱ።
+
 ### 1. የዳታቤዝ ዝግጅት (MySQL Database)
 1. MySQL ሰርቨርዎን ያስጀምሩ (ለምሳሌ በ XAMPP)።
-2. የዳታቤዝ ስኪማውን እና ማሻሻያውን ይጫኑ፦
+2. የዳታቤዝ ስኪማውን እና ማሻሻያዎቹን በቅደም ተከተል ይጫኑ፦
    ```bash
    # ነባሩን ዳታቤዝ መጫን
    mysql -u root -p < database/atsede_db.sql
 
-   # አዲሱን የላቀ ስኪማ መጫን (Migration 01)
+   # ማሻሻያዎች (migrations) — በቅደም ተከተል
    mysql -u root -p atsede_db < database/migrations/01_advanced_schema.sql
+   mysql -u root -p atsede_db < database/migrations/02_security_and_auth_hardening.sql
+   mysql -u root -p atsede_db < database/migrations/03_per_user_read_receipts.sql
+   mysql -u root -p atsede_db < database/migrations/04_production_hardening_and_idempotency.sql
    ```
+   Migration 01 አስር የመጀመሪያ የተጠቃሚ መለያዎችን (super admin + 9 ክፍሎች) በየራሳቸው
+   bcrypt hash ይፈጥራል። የይለፍ ቃሎቹ በ repo ውስጥ የሉም።
 
 ### 2. የ PHP Backend API ማስኬድ
-1. ወደ `api/` ማውጫ ይሂዱ እና `.env` ፋይሉን ያረጋግጡ፦
+1. ወደ `api/` ማውጫ ይሂዱ እና `.env` ፋይሉን ከአብነቱ ይፍጠሩ፦
    ```bash
    cp api/.env.example api/.env
    ```
-2. በ PHP ውስጣዊ አገልጋይ ወዲያውኑ ማስኬድ ይችላሉ፦
+   ከዚያ በ `.env` ውስጥ እሴቶቹን ይሙሉ፦ `DB_HOST`፣ `DB_NAME`፣ `DB_USER`፣ `DB_PASS`፣ `DB_CHARSET`
+   (የ MySQL ግንኙነት) እና `JWT_SECRET` (ቢያንስ 32 ፊደላት ያለው ጠንካራ ሚስጥር — ለምሳሌ `openssl rand -base64 32`)።
+   `.env` በ Git ውስጥ በጭራሽ አይቀመጥም።
+2. በአካባቢው (local) በ PHP ውስጣዊ አገልጋይ ወዲያውኑ ማስኬድ ይችላሉ፦
    ```bash
    php -S 127.0.0.1:8000 -t .
    ```
    *ኤፒአዩ በ `http://127.0.0.1:8000/api/` ላይ ዝግጁ ይሆናል።*
+3. ለምርት (production) ማሰማሪያ፦ የ PHP API እና MySQL ከባዶ በ 42web / InfinityFree መጫን አለባቸው
+   (አማራጭ፦ Render Docker PHP service)፤
+   ደረጃ በደረጃ፦ `docs/DEPLOY.md` ይመልከቱ። አፕሉ በ release mode የሚጠቀመው ነባሪ አድራሻ
+   (`https://plan-atsede-teguhan.onrender.com/api`) በአሁኑ ጊዜ ያለው የ Python bot አገልግሎት አድራሻ ብቻ ነው —
+   የ PHP endpoints (`auth.php` ወዘተ) እዚያ የሉም፤ PHP + MySQL እስኪጫኑ ድረስ አፕሉ ከአካባቢው አገልጋይ ጋር ብቻ ይሰራል።
 
 ### 3. የፍላተር መተግበሪያ (Flutter App)
 ```bash
@@ -111,21 +129,22 @@ cd backend
 pip install -r requirements.txt
 python bot_server.py
 ```
+ለምርት ማሰማሪያ፦ ቦቱ ያለው የ Render አገልግሎት (አገልግሎት ስም፦ `plan-atsede-teguhan`) ነው፤
+የ bot token በ Render env var ብቻ ይቀመጣል — በኮድ ወይም በ `.env` ፋይል በ Git ውስጥ በጭራሽ አይላክም።
+ደረጃ በደረጃ፦ `docs/DEPLOY.md` ይመልከቱ።
 
 ---
 
-## 🔒 ነባሪ የመግቢያ መለያዎች (Default Accounts)
+## 🔒 መግቢያ (Login)
 
-- **የፅ/ቤት አስተዳዳሪ (Super Admin):**
-  - ክፍል / የተጠቃሚ ስም፦ `admin`
-  - የይለፍ ቃል፦ `admin` (ወይም `1234` / `atsede1234`)
-- **የትምህርት ክፍል (Education):**
-  - ክፍል / የተጠቃሚ ስም፦ `education`
-  - የይለፍ ቃል፦ `1234`
-- **የመዝሙር ክፍል (Mezmur):**
-  - ክፍል / የተጠቃሚ ስም፦ `mezmur`
-  - የይለፍ ቃል፦ `1234`
-*(ሁሉም ሌሎች ክፍሎች በክፍላቸው ስም እና በ `1234` መግባት ይችላሉ፤ በመጀመሪያው መግቢያ ላይ የይለፍ ቃሉ በራስ-ሰር ወደ ደህንነቱ የተጠበቀ Bcrypt hash ይቀየራል)*
+- መግቢያ **በክፍል (per-department)** ነው፦ እያንዳንዱ ክፍል የራሱ የተጠቃሚ ስም አለው —
+  `admin` (የፅ/ቤት super admin) እና `education`፣ `mezmur`፣ `program`፣ `development`፣ `pr`፣
+  `members`፣ `audit`፣ `finance`፣ `hr` (9 ክፍሎች)።
+- **ምንም ነባሪ / የተጋራ የይለፍ ቃል የለም።** እያንዳንዱ መለያ የራሱ የተለየ ጠንካራ የመጀመሪያ የይለፍ ቃል አለው፤
+  የይለፍ ቃሎቹ በ repo ውስጥ የሉም — ለተስፋ ብቻ በተ riêng የግል ፋይል ተሰጥተዋል።
+- **እያንዳንዱ ተጠቃሚ በመጀመሪያ መግቢያ ላይ የይለፍ ቃሉን መቀየር አለበት**
+  (`auth.php?action=change_password`)። የይለፍ ቃልዎን ከረሱት የፅ/ቤት አስተዳዳሪን ያነጋግሩ —
+  የይለፍ ቃል በቻት ወይም በኢሜይል በጭራሽ አይላክም።
 
 ---
 

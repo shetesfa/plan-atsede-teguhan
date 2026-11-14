@@ -16,24 +16,20 @@ class ProposalGeneratorScreen extends StatefulWidget {
 class _ProposalGeneratorScreenState extends State<ProposalGeneratorScreen> {
   final _formKey = GlobalKey<FormState>();
 
+  // Audit M8: all fields start EMPTY. The old code pre-filled a real
+  // dated Timket proposal (named preparer, sample budget),
+  // which could be sent by accident with stale content.
   String department = 'ልማትና በጎ አድራጎት ክፍል';
-  final titleController = TextEditingController(text: 'የ2019 ዓ.ም የጥምቀት በዓል የገቢ ማስገኛ መርሃግብር ፕሮፖዛል');
-  final dateController = TextEditingController(text: '20/04/2019 ዓ.ም');
-  final objectiveController = TextEditingController(
-      text: 'በጥምቀት በዓል ላይ የተለያዩ መንፈሳዊ ንዋየ ቅዱሳትን፣ መጽሐፍትን እና መስተንግዶዎችን በማዘጋጀት ለሰንበት ትምህርት ቤቱ ገቢ ማሰባሰብ እና አባላትን ማሳተፍ።');
-  final locationDateController = TextEditingController(text: 'ከጥር 10 እስከ 12 ቀን 2019 ዓ.ም - በዋናው ጥምቀተ ባህር ድንኳን');
-  final activitiesController = TextEditingController(
-      text: '1. የድንኳን እና የቦታ ዝግጅት ማድረግ\n2. ንዋየ ቅዱሳት እና እቃዎችን ከሱቅ ማጓጓዝ\n3. ሽያጭ የሚያካሂዱ 30 አባላትን መመደብ\n4. የቀን ሽያጭ እና የሂሳብ ማጠቃለያ ለፅ/ቤት ማቅረብ');
-  final manpowerController = TextEditingController(text: '30 ንቁ አባላት (ለሽያጭ፣ ለጸጥታ እና ለእቃዎች ጥበቃ)');
-  final preparedByNameController = TextEditingController(text: 'አለማየሁ ታደሰ');
-  final preparedByTitleController = TextEditingController(text: 'የልማትና በጎ አድራጎት ክፍል ኃላፊ');
+  final titleController = TextEditingController();
+  final dateController = TextEditingController();
+  final objectiveController = TextEditingController();
+  final locationDateController = TextEditingController();
+  final activitiesController = TextEditingController();
+  final manpowerController = TextEditingController();
+  final preparedByNameController = TextEditingController();
+  final preparedByTitleController = TextEditingController();
 
-  List<BudgetItem> budgetItems = [
-    BudgetItem(itemName: 'የድንኳን ኪራይ እና ማቴሪያል', unit: 'ቀን', quantity: 3, unitPrice: 1500),
-    BudgetItem(itemName: 'የማስተዋወቂያ ባነር እና ፍላየር', unit: 'ቁጥር', quantity: 4, unitPrice: 800),
-    BudgetItem(itemName: 'ትራንስፖርት እና ጭነት', unit: 'ዙር', quantity: 2, unitPrice: 1200),
-    BudgetItem(itemName: 'ለአባላት መስተንግዶ', unit: 'ቀን', quantity: 3, unitPrice: 1000),
-  ];
+  List<BudgetItem> budgetItems = [];
 
   bool isGenerating = false;
 
@@ -255,19 +251,19 @@ class _ProposalGeneratorScreenState extends State<ProposalGeneratorScreen> {
               ),
               const SizedBox(height: 14),
 
-              _buildField('የፕሮፖዛሉ ርዕስ፡', titleController),
+              _buildField('የፕሮፖዛሉ ርዕስ፡', titleController, hint: 'የፕሮፖዛሉ ርዕስ እዚህ ያስገቡ'),
               const SizedBox(height: 14),
 
-              _buildField('ቀን፡', dateController),
+              _buildField('ቀን፡', dateController, hint: 'ቀን/ወር/ዓመት ዓ.ም'),
               const SizedBox(height: 14),
 
-              _buildField('፩. የመርሃግብሩ / የፕሮጀክቱ ዓላማ፡', objectiveController, maxLines: 3),
+              _buildField('፩. የመርሃግብሩ / የፕሮጀክቱ ዓላማ፡', objectiveController, maxLines: 3, hint: 'ዓላማውን እዚህ ያስገቡ'),
               const SizedBox(height: 14),
 
-              _buildField('፪. የክንውን ጊዜ እና ቦታ፡', locationDateController),
+              _buildField('፪. የክንውን ጊዜ እና ቦታ፡', locationDateController, hint: 'ጊዜ እና ቦታ እዚህ ያስገቡ'),
               const SizedBox(height: 14),
 
-              _buildField('፫. ዝርዝር ተግባራት እና አፈፃፀም፡', activitiesController, maxLines: 4),
+              _buildField('፫. ዝርዝር ተግባራት እና አፈፃፀም፡', activitiesController, maxLines: 4, hint: 'ተግባራትን እዚህ ያስገቡ'),
               const SizedBox(height: 18),
 
               // የበጀት ሰንጠረዥ
@@ -330,14 +326,14 @@ class _ProposalGeneratorScreenState extends State<ProposalGeneratorScreen> {
               ),
               const SizedBox(height: 18),
 
-              _buildField('፭. የሚያስፈልግ የሰው ኃይል፡', manpowerController),
+              _buildField('፭. የሚያስፈልግ የሰው ኃይል፡', manpowerController, hint: 'የሚያስፈልገውን የሰው ኃይል እዚህ ያስገቡ'),
               const SizedBox(height: 14),
 
               Row(
                 children: [
-                  Expanded(child: _buildField('አዘጋጅ ስም፡', preparedByNameController)),
+                  Expanded(child: _buildField('አዘጋጅ ስም፡', preparedByNameController, hint: 'ስም')),
                   const SizedBox(width: 10),
-                  Expanded(child: _buildField('ኃላፊነት፡', preparedByTitleController)),
+                  Expanded(child: _buildField('ኃላፊነት፡', preparedByTitleController, hint: 'ማዕረግ')),
                 ],
               ),
               const SizedBox(height: 24),
@@ -383,7 +379,7 @@ class _ProposalGeneratorScreenState extends State<ProposalGeneratorScreen> {
     );
   }
 
-  Widget _buildField(String label, TextEditingController controller, {int maxLines = 1}) {
+  Widget _buildField(String label, TextEditingController controller, {int maxLines = 1, String? hint}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -392,9 +388,10 @@ class _ProposalGeneratorScreenState extends State<ProposalGeneratorScreen> {
         TextFormField(
           controller: controller,
           maxLines: maxLines,
-          decoration: const InputDecoration(
-            border: OutlineInputBorder(),
-            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: InputDecoration(
+            hintText: hint,
+            border: const OutlineInputBorder(),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           ),
           validator: (val) => val == null || val.isEmpty ? 'ይህ ሜዳ መሞላት አለበት' : null,
         ),

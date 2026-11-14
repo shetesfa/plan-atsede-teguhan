@@ -25,11 +25,45 @@ android {
         versionName = flutter.versionName
     }
 
+    // Audit M3: release signing from environment / Gradle properties.
+    // Set these (never commit a keystore or its passwords):
+    //   KEYSTORE_PATH, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD
+    // as Gradle properties (android/key.properties or ~/.gradle/gradle.properties)
+    // or environment variables. Without them the build falls back to the
+    // debug key so local `flutter run --release` still works — but a
+    // debug-signed release MUST NOT be distributed or put on Play Store.
+    val keystorePath = providers.gradleProperty("KEYSTORE_PATH")
+        .orElse(providers.environmentVariable("KEYSTORE_PATH")).orNull
+    val keystorePassword = providers.gradleProperty("KEYSTORE_PASSWORD")
+        .orElse(providers.environmentVariable("KEYSTORE_PASSWORD")).orNull
+    val keyAlias = providers.gradleProperty("KEY_ALIAS")
+        .orElse(providers.environmentVariable("KEY_ALIAS")).orNull
+    val keyPassword = providers.gradleProperty("KEY_PASSWORD")
+        .orElse(providers.environmentVariable("KEY_PASSWORD")).orNull
+
+    signingConfigs {
+        create("release") {
+            if (keystorePath != null && keystorePassword != null &&
+                keyAlias != null && keyPassword != null) {
+                storeFile = file(keystorePath)
+                storePassword = keystorePassword
+                this.keyAlias = keyAlias
+                this.keyPassword = keyPassword
+            }
+            // If any value is missing this config stays empty and the
+            // release block below falls back to the debug config.
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (keystorePath != null && keystorePassword != null &&
+                keyAlias != null && keyPassword != null) {
+                signingConfigs.getByName("release")
+            } else {
+                // WARNING: debug-signed release — local testing only.
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }

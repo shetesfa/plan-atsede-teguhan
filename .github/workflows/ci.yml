@@ -1,0 +1,67 @@
+# CI for plan-atsede-teguhan (audit M9).
+# NOTE: the flutter job needs a Flutter version satisfying pubspec.yaml's
+# sdk constraint (^3.12.0). `subosito/flutter-action` stable channel is
+# used; if stable ever lags behind that constraint, pin an explicit
+# flutter-version here instead.
+name: CI
+
+on:
+  push:
+    branches: [main, 'fix/**']
+  pull_request:
+    branches: [main]
+
+jobs:
+  php-lint:
+    name: PHP lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up PHP 8.2
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+      - name: Lint all PHP files
+        run: |
+          set -e
+          for f in api/*.php tests/*.php; do
+            echo "php -l $f"
+            php -l "$f"
+          done
+
+  python-compile:
+    name: Python compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile backend Python files
+        run: python -m py_compile backend/*.py
+
+  flutter:
+    name: Flutter analyze & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Flutter (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Install dependencies
+        run: flutter pub get
+      # --no-fatal-infos (CI fix 2026-11-14, round 3): with current
+      # stable Flutter (3.50) `flutter analyze` fails the build on
+      # info-level issues alone. The only remaining issues are infos:
+      # every `package:flutter/material.dart` import is flagged
+      # deprecated because Flutter moved Material to the standalone
+      # `material_ui` package (formal deprecation in 3.50). Migrating
+      # 17 files to `material_ui` is a separate job; the imports still
+      # work today and the app still builds. Errors and warnings
+      # still fail this step — only info notices are tolerated.
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos
+      - name: Test
+        run: flutter test

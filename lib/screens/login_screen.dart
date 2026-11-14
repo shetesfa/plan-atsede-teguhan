@@ -423,7 +423,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
             filled: true,
             fillColor: const Color(0xFFFAFAFA),
             prefixIcon: const Icon(Icons.lock_outline_rounded, size: 18, color: AppTheme.primaryMaroon),
-            hintText: 'የይለፍ ቃል ያስገቡ (ነባሪ፡ 1234)',
+            hintText: 'የይለፍ ቃልዎን ያስገቡ — የይለፍ ቃል ከቤተክርስቲያኑ ፅ/ቤት ይሰጣል',
             hintStyle: TextStyle(fontSize: 12, color: Colors.grey.shade500),
             contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
             border: OutlineInputBorder(

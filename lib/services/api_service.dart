@@ -5,14 +5,52 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+/// የአገልጋይ ጥሪ ሲወድቅ የሚጣል ስህተት — ከ "እቅድ የለም" (ባዶ ዝርዝር) ጋር
+/// እንዳይደባለቅ ይጠቅማል። ይሄን የሚጠቀምበት UI "server አልተገኘም" ብሎ መለየት
+/// ይችላል (M10)።
+class ApiException implements Exception {
+  final String message;
+  final int? statusCode;
+  const ApiException(this.message, [this.statusCode]);
+  @override
+  String toString() =>
+      'ApiException${statusCode != null ? ' (HTTP $statusCode)' : ''}: $message';
+}
+
 class ApiService {
   static final ApiService _instance = ApiService._internal();
   factory ApiService() => _instance;
   ApiService._internal();
 
-  // በነባሪ በምርት (Production) ወይም በሙከራ (Dev) የሚወሰን፤ በ dart-define ሊቀየር የሚችል
+  // ── የአገልጋይ አድራሻ (Base URL) ──────────────────────────────────────────
+  // ማስታወሻ (2026-11-14)፦ በ Render ላይ ያለው የ Python bot አገልግሎት
+  // (plan-atsede-teguhan.onrender.com) የ Tesfa ነባር አገልግሎት ነው፤ ግን የ PHP API
+  // (+ MySQL) ገና በየትም ቦታ አልተጫነም። ከታች ያለው _defaultProdUrl ነባሪ እሴት ብቻ
+  // ነው — እስኪዘጋጅ ድረስ አፕሉ በ release mode ከ PHP API ጋር መገናኘት አይችልም።
+  // PHP API በ 42web ላይ ሲጫን የአገልጋዩን አድራሻ በሚከተለው መንገድ ያስቀምጡ፦
+  //   1) --dart-define API_BASE_URL=https://<የ42web ዶሜይን>/api, ወይም
+  //   2) ApiService.baseUrl = 'https://<የ42web ዶሜይን>/api' (static setter —
+  //      በ login screen ላይ ሊቀየር ይችላል)።
+  // ቅደም ተከተል፦ setter/የተቀመጠ እሴት > --dart-define > ነባሪ።
   static const String _defaultProdUrl = 'https://plan-atsede-teguhan.onrender.com/api';
+
+  /// በ --dart-define API_BASE_URL የሚሰጥ የአገልጋይ አድራሻ (build ጊዜ override)።
+  static const String _envApiBaseUrl = String.fromEnvironment('API_BASE_URL');
+
+  // Debug (M1)፦ 127.0.0.1 በእውነተኛ Android ስልክ ላይ አይሰራም፤ በ Android
+  // emulator ላይ የ host PC አድራሻ 10.0.2.2 ነው፤ በሌሎች platform (iOS
+  // simulator / desktop / web) 127.0.0.1 ይሰራል። በእውነተኛ ስልክ ላይ debug
+  // ለማድረግ የ PCውን LAN IP መጠቀም ያስፈልጋል — ለምሳሌ
+  // --dart-define API_BASE_URL=http://192.168.x.x:8000/api።
   static const String _defaultDevUrl = 'http://127.0.0.1:8000/api';
+  static const String _defaultDevUrlAndroidEmulator = 'http://10.0.2.2:8000/api';
+
+  static String get _defaultDebugUrl {
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      return _defaultDevUrlAndroidEmulator;
+    }
+    return _defaultDevUrl;
+  }
 
   static String? _customBaseUrl;
 
@@ -25,7 +63,13 @@ class ApiService {
         return _defaultDevUrl;
       }
     }
-    return _customBaseUrl ?? (kReleaseMode ? _defaultProdUrl : _defaultDevUrl);
+    if (_customBaseUrl != null && _customBaseUrl!.isNotEmpty) {
+      return _customBaseUrl!;
+    }
+    if (_envApiBaseUrl.isNotEmpty) {
+      return _envApiBaseUrl;
+    }
+    return kReleaseMode ? _defaultProdUrl : _defaultDebugUrl;
   }
 
   static set baseUrl(String value) {
@@ -165,25 +209,57 @@ class ApiService {
   }
 
   // 2. እቅዶችን ማምጣት (Get Plans)
-  Future<List<Map<String, dynamic>>> getPlans({String? dept, String? status, String? search}) async {
+  // M10፦ የአገልጋይ ስህተት ከ "እቅድ የለም" እንዳይደባለቅ፦
+  //  • fetchPlans() — ስህተት ሲኖር ApiException ይጥላል (UI "server አልተገኘም" ማለት ይችላል)።
+  //  • getPlans() — ለኋላ ተኳሃኝነት [] ይመልሳል፣ ግን ስህተቱን በ lastError ላይ ይመዘግባል።
+  //  • lastError — የመጨረሻው የ getPlans()/fetchPlans() ጥሪ ስህተት፤ null ማለት
+  //    ስኬታማ ወይም ገና አልተጠራም ማለት ነው።
+  String? lastError;
+
+  /// እቅዶችን ከአገልጋዩ ማምጣት — network/HTTP/JSON ስህተት ሲኖር ApiException ይጥላል።
+  Future<List<Map<String, dynamic>>> fetchPlans({String? dept, String? status, String? search}) async {
     final queryParams = <String, String>{};
     if (dept != null && dept.isNotEmpty && dept != 'all') queryParams['dept'] = dept;
     if (status != null && status.isNotEmpty && status != 'all') queryParams['status'] = status;
     if (search != null && search.isNotEmpty) queryParams['search'] = search;
 
     final uri = Uri.parse('$baseUrl/plans.php').replace(queryParameters: queryParams);
+    http.Response res;
     try {
-      final res = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 12));
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        if (data['status'] == 'success' && data['data'] is List) {
-          return List<Map<String, dynamic>>.from(data['data']);
-        }
-      }
+      res = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 12));
     } catch (e) {
-      debugPrint('getPlans network error: $e');
+      lastError = 'የአገልጋይ ግንኙነት አልተሳካም፦ $e';
+      debugPrint('fetchPlans network error: $e');
+      throw ApiException(lastError!);
     }
-    return [];
+    if (res.statusCode != 200) {
+      lastError = 'አገልጋዩ ስህተት መልሷል (HTTP ${res.statusCode})';
+      throw ApiException(lastError!, res.statusCode);
+    }
+    try {
+      final data = jsonDecode(res.body);
+      if (data['status'] == 'success' && data['data'] is List) {
+        lastError = null;
+        return List<Map<String, dynamic>>.from(data['data']);
+      }
+      lastError = data['message']?.toString() ?? 'አገልጋዩ ያልተጠበቀ መልስ ሰጥቷል';
+      throw ApiException(lastError!, res.statusCode);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      lastError = 'የአገልጋዩን መልስ ማንበብ አልተቻለም፦ $e';
+      throw ApiException(lastError!);
+    }
+  }
+
+  /// ለኋላ ተኳሃኝነት፦ ስህተት ሲኖር [] ይመልሳል እና ስህተቱን በ [lastError] ላይ ይመዘግባል።
+  Future<List<Map<String, dynamic>>> getPlans({String? dept, String? status, String? search}) async {
+    try {
+      return await fetchPlans(dept: dept, status: status, search: search);
+    } on ApiException catch (e) {
+      debugPrint('getPlans failed: $e');
+      return [];
+    }
   }
 
   // 3. እቅድ መፍጠር ወይም ማሻሻል (Create or Update Plan)
@@ -197,10 +273,35 @@ class ApiService {
       ).timeout(const Duration(seconds: 12));
 
       final data = jsonDecode(res.body);
-      if (res.statusCode == 200 && data['status'] == 'success') {
+      // ማስታወሻ፦ አዲስ እቅድ ሲፈጠር plans.php 201 ይመልሳል (200 አይደለም)።
+      if ((res.statusCode == 200 || res.statusCode == 201) && data['status'] == 'success') {
         return {'success': true, 'data': data['data']};
       }
       return {'success': false, 'message': data['message'] ?? 'እቅዱን ማስቀመጥ አልተቻለም'};
+    } catch (e) {
+      return {'success': false, 'message': 'የአውታረ-መረብ ስህተት፦ $e'};
+    }
+  }
+
+  // 3b. ሰነድ ወደ ሰነዶች ማህደር ማስቀመጥ (Save Document — M12)
+  // ሰነዶች ወደ documents.php ይላካሉ እንጂ ወደ plans.php አይደሉም። auth token
+  // በ _headers ውስጥ በ Bearer ይላካል።
+  Future<Map<String, dynamic>> saveDocument(Map<String, dynamic> documentData) async {
+    final url = Uri.parse('$baseUrl/documents.php');
+    try {
+      final res = await http.post(
+        url,
+        headers: _headers,
+        body: jsonEncode(documentData),
+      ).timeout(const Duration(seconds: 12));
+
+      final data = jsonDecode(res.body);
+      // ማስታወሻ፦ አዲስ ሰነድ ሲፈጠር documents.php 201 ይመልሳል (200 አይደለም)።
+      if ((res.statusCode == 200 || res.statusCode == 201) && data['status'] == 'success') {
+        final saved = data['data'] is Map ? Map<String, dynamic>.from(data['data']) : <String, dynamic>{};
+        return {'success': true, 'data': saved, 'id': saved['id']};
+      }
+      return {'success': false, 'message': data['message'] ?? 'ሰነዱን ማስቀመጥ አልተቻለም'};
     } catch (e) {
       return {'success': false, 'message': 'የአውታረ-መረብ ስህተት፦ $e'};
     }
@@ -252,7 +353,7 @@ class ApiService {
       ).timeout(const Duration(seconds: 15));
 
       final data = jsonDecode(res.body);
-      if (res.statusCode == 200 && data['status'] == 'success') {
+      if ((res.statusCode == 200 || res.statusCode == 201) && data['status'] == 'success') {
         return {'success': true, 'data': data['data']};
       }
       return {'success': false, 'message': data['message'] ?? 'ሪፖርቱን ማስገባት አልተቻለም'};

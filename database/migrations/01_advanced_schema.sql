@@ -12,21 +12,25 @@ ALTER TABLE `users`
   ADD COLUMN IF NOT EXISTS `status` ENUM('active', 'inactive', 'suspended') DEFAULT 'active' AFTER `phone`,
   ADD COLUMN IF NOT EXISTS `last_login` DATETIME NULL AFTER `created_at`;
 
--- ነባር ክፍሎች ተጠቃሚዎች ከሌሏቸው ነባሪ መለያዎችን ማዘጋጀት (Default admin and dept users)
--- የይለፍ ቃል ነባሪ 'atsede2019' በ bcrypt hash (Cost 10): $2y$10$7R0O1Nq9QWv2fK...
--- ለሙከራ እና ለቀላል አጠቃቀም የሚከተለውን የ bcrypt hash እንጠቀማለን (ይለፍ ቃል: atsede1234)
+-- ነባር ክፍሎች ተጠቃሚዎች ከሌሏቸው የመጀመሪያ መለያዎችን ማዘጋጀት (Initial admin and dept users)
+-- እያንዳንዱ ተጠቃሚ የራሱ የተለየ ጠንካራ የይለፍ ቃል አለው፤ hashዎቹ እዚህ በታች
+-- በ bcrypt (cost 12) የተፈጠሩ እውነተኛ hashes ናቸው እና በ PHP password_verify()
+-- ይረጋገጣሉ (PHP $2b$ bcrypt hash ያቀበላል)። የይለፍ ቃል እሴቶች በዚህ ፋይል ውስጥ
+-- የሉም፤ የመጀመሪያ የይለፍ ቃሎች ለተስፋ ብቻ በተ riêng የግል ፋይል ተሰጥተዋል።
+-- እያንዳንዱ ተጠቃሚ በመጀመሪያ መግቢያ ላይ የይለፍ ቃሉን መቀየር አለበት።
+-- (Audit 2026-11-14, C2/H7: ቀደም ሲል 10ቱም ተጠቃሚዎች አንድ የተፈጠረ hash ነበራቸው፤ ተስተካክሏል።)
 INSERT INTO `users` (`department_id`, `username`, `full_name`, `role_title`, `password_hash`, `status`)
 VALUES 
-('admin', 'admin', 'ዲ/ን ቴዎድሮስ (ፅ/ቤት)', 'የፅ/ቤት ዋና ጸሐፊ', '$2y$10$8W3b2yZ2a1eYd4g7h9j1kOwGv.mRz1qJ3k5L7p9Q1s3u5w7y9z1a.', 'active'),
-('education', 'education', 'ተስፋሁን ባይህ (ትምህርት)', 'የትምህርት እና ስልጠና ኃላፊ', '$2y$10$8W3b2yZ2a1eYd4g7h9j1kOwGv.mRz1qJ3k5L7p9Q1s3u5w7y9z1a.', 'active'),
-('mezmur', 'mezmur', 'መዝሙር ክፍል ተወካይ', 'የመዝሙር እና ስነጥበብ ኃላፊ', '$2y$10$8W3b2yZ2a1eYd4g7h9j1kOwGv.mRz1qJ3k5L7p9Q1s3u5w7y9z1a.', 'active'),
-('program', 'program', 'መርሃግብር ክፍል ተወካይ', 'የመርሃግብር ኃላፊ', '$2y$10$8W3b2yZ2a1eYd4g7h9j1kOwGv.mRz1qJ3k5L7p9Q1s3u5w7y9z1a.', 'active'),
-('development', 'development', 'ልማት ክፍል ተወካይ', 'የልማትና በጎ አድራጎት ኃላፊ', '$2y$10$8W3b2yZ2a1eYd4g7h9j1kOwGv.mRz1qJ3k5L7p9Q1s3u5w7y9z1a.', 'active'),
-('pr', 'pr', 'መረጃ ክፍል ተወካይ', 'የመረጃና ግንኙነት ኃላፊ', '$2y$10$8W3b2yZ2a1eYd4g7h9j1kOwGv.mRz1qJ3k5L7p9Q1s3u5w7y9z1a.', 'active'),
-('members', 'members', 'አባላት ክፍል ተወካይ', 'የአባላት አስተዳደር ኃላፊ', '$2y$10$8W3b2yZ2a1eYd4g7h9j1kOwGv.mRz1qJ3k5L7p9Q1s3u5w7y9z1a.', 'active'),
-('audit', 'audit', 'ቁጥጥር ክፍል ተወካይ', 'የቁጥጥር ክፍል ኃላፊ', '$2y$10$8W3b2yZ2a1eYd4g7h9j1kOwGv.mRz1qJ3k5L7p9Q1s3u5w7y9z1a.', 'active'),
-('finance', 'finance', 'በጀት ክፍል ተወካይ', 'የበጀትና ንብረት ኃላፊ', '$2y$10$8W3b2yZ2a1eYd4g7h9j1kOwGv.mRz1qJ3k5L7p9Q1s3u5w7y9z1a.', 'active'),
-('hr', 'hr', 'ሰው ሀብት ተወካይ', 'የሰው ሀብት አስተዳደር ኃላፊ', '$2y$10$8W3b2yZ2a1eYd4g7h9j1kOwGv.mRz1qJ3k5L7p9Q1s3u5w7y9z1a.', 'active')
+('admin', 'admin', 'ዲ/ን ቴዎድሮስ (ፅ/ቤት)', 'የፅ/ቤት ዋና ጸሐፊ', '$2b$12$TfyAbDTxR9b0e/NrGafUn.Km7y758L6qrzaoI9ScB4Y/cRDFFzmRi', 'active'),
+('education', 'education', 'ተስፋሁን ባይህ (ትምህርት)', 'የትምህርት እና ስልጠና ኃላፊ', '$2b$12$FqzJgTrx1LWCrTiGnQEX0e1X7.pSKcMhNZAPsdq4sRpmqPyHH4RHG', 'active'),
+('mezmur', 'mezmur', 'መዝሙር ክፍል ተወካይ', 'የመዝሙር እና ስነጥበብ ኃላፊ', '$2b$12$AnjPEjehA.4ZSkFczExfRODxfYQ7dn.F1TYQN6BnoGgXbw7pYDTcm', 'active'),
+('program', 'program', 'መርሃግብር ክፍል ተወካይ', 'የመርሃግብር ኃላፊ', '$2b$12$Xz6jV27LdLdP/65GbthT9.551mS3yKvYokHFRLSbz/J1fs7jnh/lm', 'active'),
+('development', 'development', 'ልማት ክፍል ተወካይ', 'የልማትና በጎ አድራጎት ኃላፊ', '$2b$12$1FQXpXm0xqg.rkJQGaT5E.c6gWKwtOUosMlpHyaAsVcCzah11cEG2', 'active'),
+('pr', 'pr', 'መረጃ ክፍል ተወካይ', 'የመረጃና ግንኙነት ኃላፊ', '$2b$12$kMsAEASzxcufskb7UtemOO1TN8m3b0OnWgWq1zyqXgVqErfvrgFNm', 'active'),
+('members', 'members', 'አባላት ክፍል ተወካይ', 'የአባላት አስተዳደር ኃላፊ', '$2b$12$UNiAylHjYr6UPONlWD55sOXIsay3P/.Mjk061mB7Fj6aigocadg/.', 'active'),
+('audit', 'audit', 'ቁጥጥር ክፍል ተወካይ', 'የቁጥጥር ክፍል ኃላፊ', '$2b$12$msoaShoeFub5K6WlZ4JebekQZM/ba1Q8WMfLuHkG0O3.5p8EdyOEq', 'active'),
+('finance', 'finance', 'በጀት ክፍል ተወካይ', 'የበጀትና ንብረት ኃላፊ', '$2b$12$brqvw1SUMZX8vqhsesCFzOKPfcD9DEvSTWxA27nSUn/eH46egVyb6', 'active'),
+('hr', 'hr', 'ሰው ሀብት ተወካይ', 'የሰው ሀብት አስተዳደር ኃላፊ', '$2b$12$ALjZMkTXkVl.vVhJlyw8Lua6jOc6obf4i.rkH5GUkLb6ZkXlyk8SO', 'active')
 ON DUPLICATE KEY UPDATE `full_name`=VALUES(`full_name`);
 
 -- 2. የእቅዶች ሰንጠረዥ ማሻሻያ (Plans Schema Enhancement)
