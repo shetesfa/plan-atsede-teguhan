@@ -10,6 +10,10 @@ FROM php:8.2-apache
 RUN docker-php-ext-install pdo pdo_mysql \
     && a2enmod rewrite
 
+# Production PHP settings: never show errors (paths, SQL) to visitors;
+# log them to the container log instead.
+RUN printf 'display_errors=Off\nlog_errors=On\n' > /usr/local/etc/php/conf.d/production.ini
+
 # Copy the PHP API into the Apache document root. The build context is
 # the repo root, so this copies ./api/ (no .env file is committed).
 COPY api/ /var/www/html/
