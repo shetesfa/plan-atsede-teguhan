@@ -9,8 +9,13 @@
 -- NOTE (TiDB): one ADD COLUMN per ALTER — a single ALTER with several
 -- ADD COLUMN ... AFTER clauses fails on TiDB when an AFTER column was
 -- added in the same statement.
+-- NOTE (TiDB): an inline UNIQUE constraint in ADD COLUMN is NOT supported
+-- by TiDB ("unsupported add column ... constraint UNIQUE KEY"). Add the
+-- column plain, then add the unique index as a separate ALTER.
 ALTER TABLE `users`
-  ADD COLUMN IF NOT EXISTS `username` VARCHAR(80) NULL UNIQUE AFTER `department_id`;
+  ADD COLUMN IF NOT EXISTS `username` VARCHAR(80) NULL AFTER `department_id`;
+ALTER TABLE `users`
+  ADD UNIQUE INDEX `idx_users_username_unique` (`username`);
 ALTER TABLE `users`
   ADD COLUMN IF NOT EXISTS `email` VARCHAR(150) NULL AFTER `phone`;
 ALTER TABLE `users`
