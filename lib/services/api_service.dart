@@ -23,16 +23,14 @@ class ApiService {
   ApiService._internal();
 
   // ── የአገልጋይ አድራሻ (Base URL) ──────────────────────────────────────────
-  // ማስታወሻ (2026-11-14)፦ በ Render ላይ ያለው የ Python bot አገልግሎት
-  // (plan-atsede-teguhan.onrender.com) የ Tesfa ነባር አገልግሎት ነው፤ ግን የ PHP API
-  // (+ MySQL) ገና በየትም ቦታ አልተጫነም። ከታች ያለው _defaultProdUrl ነባሪ እሴት ብቻ
-  // ነው — እስኪዘጋጅ ድረስ አፕሉ በ release mode ከ PHP API ጋር መገናኘት አይችልም።
-  // PHP API በ 42web ላይ ሲጫን የአገልጋዩን አድራሻ በሚከተለው መንገድ ያስቀምጡ፦
-  //   1) --dart-define API_BASE_URL=https://<የ42web ዶሜይን>/api, ወይም
-  //   2) ApiService.baseUrl = 'https://<የ42web ዶሜይን>/api' (static setter —
+  // ማስታወሻ (2026-11-25)፦ የ PHP API አሁን በ Render ላይ ተጭኗል
+  // (plan-atsede-php-api.onrender.com)፤ ነባሪው አድራሻ ያ ነው — ያለ /api።
+  // አድራሻውን በሚከተለው መንገድ መቀየር ይቻላል፦
+  //   1) --dart-define API_BASE_URL=https://plan-atsede-php-api.onrender.com, ወይም
+  //   2) ApiService.baseUrl = '...' (static setter —
   //      በ login screen ላይ ሊቀየር ይችላል)።
   // ቅደም ተከተል፦ setter/የተቀመጠ እሴት > --dart-define > ነባሪ።
-  static const String _defaultProdUrl = 'https://plan-atsede-teguhan.onrender.com/api';
+  static const String _defaultProdUrl = 'https://plan-atsede-php-api.onrender.com';
 
   /// በ --dart-define API_BASE_URL የሚሰጥ የአገልጋይ አድራሻ (build ጊዜ override)።
   static const String _envApiBaseUrl = String.fromEnvironment('API_BASE_URL');
