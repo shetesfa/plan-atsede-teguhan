@@ -144,12 +144,42 @@ if ($appEnv === 'production' && trim($dbPass) === '') {
     jsonError('በምርት አካባቢ (production) ላይ ባዶ የዳታቤዝ የይለፍ ቃል መጠቀም በጥብቅ የተከለከለ ነው (Empty DB_PASS is forbidden).', 500);
 }
 
-$dsn = "mysql:host=$dbHost;dbname=$dbName;charset=$dbCharset";
+$dbPort = 3306;
+if (str_contains($dbHost, ':')) {
+    [$dbHostOnly, $dbPortPart] = explode(':', $dbHost, 2);
+    $dbHost = trim($dbHostOnly);
+    $dbPort = (int) trim($dbPortPart) ?: 3306;
+}
+
+$dsn = "mysql:host=$dbHost;port=$dbPort;dbname=$dbName;charset=$dbCharset";
 $options = [
     PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
     PDO::ATTR_EMULATE_PREPARES   => false,
 ];
+
+// TiDB Cloud Serverless (and any managed MySQL behind TLS) refuses plain
+// connections, so the API must connect over TLS. A bundled CA file turns
+// SSL on, and server-cert verification is disabled so a private/unknown
+// CA cannot break the connection — the traffic is still encrypted.
+// Only hosts that need TLS get this; plain local/42web MySQL is untouched.
+$needsTls = str_contains($dbHost, 'tidbcloud.com') || getenv('DB_SSL') === '1';
+if ($needsTls) {
+    $caFile = getenv('DB_SSL_CA');
+    if ($caFile === false || $caFile === '') {
+        $caFile = __DIR__ . '/cacert.pem';
+    }
+    if (defined('PDO::MYSQL_ATTR_SSL_CA')) {
+        if (is_string($caFile) && file_exists($caFile)) {
+            $options[PDO::MYSQL_ATTR_SSL_CA] = $caFile;
+        } elseif (file_exists('/etc/ssl/certs/ca-certificates.crt')) {
+            $options[PDO::MYSQL_ATTR_SSL_CA] = '/etc/ssl/certs/ca-certificates.crt';
+        }
+    }
+    if (defined('PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT')) {
+        $options[PDO::MYSQL_ATTR_SSL_VERIFY_SERVER_CERT] = false;
+    }
+}
 
 try {
     $pdo = new PDO($dsn, $dbUser, $dbPass !== false ? $dbPass : '', $options);

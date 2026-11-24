@@ -6,10 +6,16 @@
 -- የውሂብ ጎታ ምርጫ የሚከናወነው በአገልጋዩ ውቅር (PDO DSN) አማካኝነት ነው (No hardcoded USE db)
 
 -- 1. የተጠቃሚዎች ሰንጠረዥ ማሻሻያ (Users Schema Enhancement)
+-- NOTE (TiDB): one ADD COLUMN per ALTER — a single ALTER with several
+-- ADD COLUMN ... AFTER clauses fails on TiDB when an AFTER column was
+-- added in the same statement.
 ALTER TABLE `users`
-  ADD COLUMN IF NOT EXISTS `username` VARCHAR(80) NULL UNIQUE AFTER `department_id`,
-  ADD COLUMN IF NOT EXISTS `email` VARCHAR(150) NULL AFTER `phone`,
-  ADD COLUMN IF NOT EXISTS `status` ENUM('active', 'inactive', 'suspended') DEFAULT 'active' AFTER `phone`,
+  ADD COLUMN IF NOT EXISTS `username` VARCHAR(80) NULL UNIQUE AFTER `department_id`;
+ALTER TABLE `users`
+  ADD COLUMN IF NOT EXISTS `email` VARCHAR(150) NULL AFTER `phone`;
+ALTER TABLE `users`
+  ADD COLUMN IF NOT EXISTS `status` ENUM('active', 'inactive', 'suspended') DEFAULT 'active' AFTER `phone`;
+ALTER TABLE `users`
   ADD COLUMN IF NOT EXISTS `last_login` DATETIME NULL AFTER `created_at`;
 
 -- ነባር ክፍሎች ተጠቃሚዎች ከሌሏቸው የመጀመሪያ መለያዎችን ማዘጋጀት (Initial admin and dept users)
@@ -34,18 +40,30 @@ VALUES
 ON DUPLICATE KEY UPDATE `full_name`=VALUES(`full_name`);
 
 -- 2. የእቅዶች ሰንጠረዥ ማሻሻያ (Plans Schema Enhancement)
+-- NOTE (TiDB): one ADD COLUMN per ALTER — see note above.
 ALTER TABLE `plans`
-  ADD COLUMN IF NOT EXISTS `title` VARCHAR(255) NULL AFTER `department_id`,
-  ADD COLUMN IF NOT EXISTS `status` ENUM('draft', 'pending', 'approved', 'in_progress', 'completed', 'overdue', 'cancelled') DEFAULT 'in_progress' AFTER `progress_percent`,
-  ADD COLUMN IF NOT EXISTS `priority` ENUM('low', 'medium', 'high', 'urgent') DEFAULT 'medium' AFTER `status`,
-  ADD COLUMN IF NOT EXISTS `assigned_to` VARCHAR(150) NULL AFTER `priority`,
-  ADD COLUMN IF NOT EXISTS `target_date` VARCHAR(100) NULL AFTER `execution_time`,
-  ADD COLUMN IF NOT EXISTS `start_date` DATE NULL AFTER `target_date`,
-  ADD COLUMN IF NOT EXISTS `end_date` DATE NULL AFTER `start_date`,
-  ADD COLUMN IF NOT EXISTS `created_by` VARCHAR(100) NULL AFTER `assigned_to`,
-  ADD COLUMN IF NOT EXISTS `sync_id` VARCHAR(100) NULL AFTER `updated_at`,
-  ADD COLUMN IF NOT EXISTS `version` INT DEFAULT 1 AFTER `sync_id`,
-  ADD COLUMN IF NOT EXISTS `is_deleted` TINYINT(1) DEFAULT 0 AFTER `version`,
+  ADD COLUMN IF NOT EXISTS `title` VARCHAR(255) NULL AFTER `department_id`;
+ALTER TABLE `plans`
+  ADD COLUMN IF NOT EXISTS `status` ENUM('draft', 'pending', 'approved', 'in_progress', 'completed', 'overdue', 'cancelled') DEFAULT 'in_progress' AFTER `progress_percent`;
+ALTER TABLE `plans`
+  ADD COLUMN IF NOT EXISTS `priority` ENUM('low', 'medium', 'high', 'urgent') DEFAULT 'medium' AFTER `status`;
+ALTER TABLE `plans`
+  ADD COLUMN IF NOT EXISTS `assigned_to` VARCHAR(150) NULL AFTER `priority`;
+ALTER TABLE `plans`
+  ADD COLUMN IF NOT EXISTS `target_date` VARCHAR(100) NULL AFTER `execution_time`;
+ALTER TABLE `plans`
+  ADD COLUMN IF NOT EXISTS `start_date` DATE NULL AFTER `target_date`;
+ALTER TABLE `plans`
+  ADD COLUMN IF NOT EXISTS `end_date` DATE NULL AFTER `start_date`;
+ALTER TABLE `plans`
+  ADD COLUMN IF NOT EXISTS `created_by` VARCHAR(100) NULL AFTER `assigned_to`;
+ALTER TABLE `plans`
+  ADD COLUMN IF NOT EXISTS `sync_id` VARCHAR(100) NULL AFTER `updated_at`;
+ALTER TABLE `plans`
+  ADD COLUMN IF NOT EXISTS `version` INT DEFAULT 1 AFTER `sync_id`;
+ALTER TABLE `plans`
+  ADD COLUMN IF NOT EXISTS `is_deleted` TINYINT(1) DEFAULT 0 AFTER `version`;
+ALTER TABLE `plans`
   ADD COLUMN IF NOT EXISTS `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP AFTER `is_deleted`;
 
 -- 3. የክንውን ሪፖርት ማቅረቢያ ሰንጠረዥ (Reports Table)
@@ -145,11 +163,16 @@ INSERT INTO `chat_rooms` (`id`, `name`, `type`) VALUES
 ON DUPLICATE KEY UPDATE `name`=VALUES(`name`);
 
 -- 9. የውይይት መልእክቶች ማሻሻያ (Chat Messages Enhancement)
+-- NOTE (TiDB): one ADD COLUMN per ALTER — see note above.
 ALTER TABLE `chat_messages`
-  ADD COLUMN IF NOT EXISTS `room_id` VARCHAR(100) DEFAULT 'room_general' AFTER `id`,
-  ADD COLUMN IF NOT EXISTS `reply_to_id` VARCHAR(100) NULL AFTER `message`,
-  ADD COLUMN IF NOT EXISTS `is_read` TINYINT(1) DEFAULT 0 AFTER `is_official_notice`,
-  ADD COLUMN IF NOT EXISTS `sync_id` VARCHAR(100) NULL AFTER `attachment_path`,
+  ADD COLUMN IF NOT EXISTS `room_id` VARCHAR(100) DEFAULT 'room_general' AFTER `id`;
+ALTER TABLE `chat_messages`
+  ADD COLUMN IF NOT EXISTS `reply_to_id` VARCHAR(100) NULL AFTER `message`;
+ALTER TABLE `chat_messages`
+  ADD COLUMN IF NOT EXISTS `is_read` TINYINT(1) DEFAULT 0 AFTER `is_official_notice`;
+ALTER TABLE `chat_messages`
+  ADD COLUMN IF NOT EXISTS `sync_id` VARCHAR(100) NULL AFTER `attachment_path`;
+ALTER TABLE `chat_messages`
   ADD COLUMN IF NOT EXISTS `is_deleted` TINYINT(1) DEFAULT 0 AFTER `sync_id`;
 
 -- 10. የስርዓት ኦዲት መዝገብ (System Audit Logs)
