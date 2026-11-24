@@ -1,0 +1,55 @@
+# Build the Android release APK and publish it as a GitHub Release.
+#
+# The APK is built with the live PHP API as its server address
+# (https://plan-atsede-php-api.onrender.com — bare URL, no /api suffix),
+# so the app can log in and load plans without any setup on the phone.
+# It is debug-signed (see android/app/build.gradle.kts): installable by
+# sideloading on a phone, NOT for the Play Store.
+#
+# Trigger: every push to main that touches the app code, or manually
+# from the Actions tab (Run workflow).
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'lib/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - 'android/**'
+      - '.github/workflows/build-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    name: Build release APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Flutter (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Install dependencies
+        run: flutter pub get
+      - name: Build release APK
+        run: flutter build apk --release --dart-define API_BASE_URL=https://plan-atsede-php-api.onrender.com
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plan-atsede-teguhan-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-${{ github.run_number }}
+          name: Android APK build ${{ github.run_number }}
+          body: |
+            Release APK built from main (${{ github.sha }}).
+            Server: https://plan-atsede-php-api.onrender.com
+            Download app-release.apk on the phone, tap it and install.
+          files: build/app/outputs/flutter-apk/app-release.apk
