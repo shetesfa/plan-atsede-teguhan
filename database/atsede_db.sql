@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS `plans` (
   `detail_task` TEXT NOT NULL,
   `measurement` VARCHAR(100) NULL,
   `quantity` VARCHAR(100) NULL,
-  `execution_time` VARCHAR(200) NULL,
+  `execution_time` VARCHAR(500) NULL,
   `budget` VARCHAR(100) NULL,
   `remarks` TEXT NULL,
   `months_json` JSON NULL,
