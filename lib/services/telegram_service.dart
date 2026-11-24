@@ -34,7 +34,10 @@ class TelegramService {
   static String botToken = '';
   static String get baseUrl => botToken.isNotEmpty ? 'https://api.telegram.org/bot$botToken' : '';
   static String get fileBaseUrl => botToken.isNotEmpty ? 'https://api.telegram.org/file/bot$botToken' : '';
-  static const String cloudBackendUrl = 'https://plan-atsede-teguhan.onrender.com';
+  // 2026-11-25: the live bot service is plan-atsede-teguhan-new
+  // (Render, tesfahunbaye6@gmail.com) — the old plan-atsede-teguhan
+  // service runs pre-audit code in the other Render account.
+  static const String cloudBackendUrl = 'https://plan-atsede-teguhan-new.onrender.com';
 
   static String? savedChatId;
 
