@@ -11,6 +11,7 @@ import '../services/offline_sync_service.dart';
 import '../services/notification_service.dart';
 import '../services/telegram_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/ethiopian_date_display.dart';
 
 class PlansScreen extends StatefulWidget {
   final List<PlanItem> plans;
@@ -1143,12 +1144,20 @@ class _PlansScreenState extends State<PlansScreen> {
           dataRowMaxHeight: 64,
           columnSpacing: 14,
           border: TableBorder.all(color: Colors.grey.shade300, width: 0.5),
+          // Excel header (2026-11-25): the table shows the same columns
+          // as the 2019 Excel — ተ.ቁ | ክፍል | ንዑስ ክፍል | ዐቢይ ተግባራት |
+          // ዝርዝር ተግባር | መለኪያ | ብዛት | የማስፈጸሚያ ጊዜ | በጀት — so a
+          // plan reads exactly like its Excel row.
           columns: const [
             DataColumn(label: Text('ተ.ቁ')),
             DataColumn(label: Text('ክፍል')),
             DataColumn(label: Text('ንዑስ ክፍል')),
+            DataColumn(label: Text('ዐቢይ ተግባራት')),
             DataColumn(label: Text('ዝርዝር ተግባር')),
+            DataColumn(label: Text('መለኪያ')),
+            DataColumn(label: Text('ብዛት')),
             DataColumn(label: Text('የማስፈጸሚያ ጊዜ')),
+            DataColumn(label: Text('በጀት')),
             DataColumn(label: Text('ሁኔታ / ማስተላለፍ')),
             DataColumn(label: Text('ደረጃ')),
             DataColumn(label: Text('እርምጃዎች')),
@@ -1174,6 +1183,17 @@ class _PlansScreenState extends State<PlansScreen> {
                 DataCell(Text(item.subDepartment, style: const TextStyle(fontSize: 11))),
                 DataCell(
                   SizedBox(
+                    width: 200,
+                    child: Text(
+                      item.mainTask,
+                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ),
+                DataCell(
+                  SizedBox(
                     width: 250,
                     child: Text(
                       item.detailTask.isNotEmpty ? item.detailTask : item.mainTask,
@@ -1183,12 +1203,21 @@ class _PlansScreenState extends State<PlansScreen> {
                     ),
                   ),
                 ),
+                DataCell(Text(item.measurement, style: const TextStyle(fontSize: 11))),
+                DataCell(Text(item.quantity, style: const TextStyle(fontSize: 11))),
                 DataCell(
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Text(item.executionTime, style: const TextStyle(fontSize: 11)),
+                      // Full month names, not abbreviations:
+                      // "መስከረም 10–30, የካቲት 6–28" instead of "መስ (10-30), የካ (6-28)".
+                      Text(readableExecutionTime(item.executionTime), style: const TextStyle(fontSize: 11)),
+                      if (item.dueDateEthiopian != null && item.dueDateEthiopian!.isNotEmpty)
+                        Text(
+                          'ቀኑ፦ ${item.dueDateEthiopian}',
+                          style: const TextStyle(fontSize: 10, color: Colors.black87, fontWeight: FontWeight.bold),
+                        ),
                       if (item.isPostponed)
                         Text(
                           '👉 የተላለፈ፦ ${item.postponedDate}',
@@ -1197,6 +1226,7 @@ class _PlansScreenState extends State<PlansScreen> {
                     ],
                   ),
                 ),
+                DataCell(Text(item.budget, style: const TextStyle(fontSize: 11))),
                 DataCell(
                   item.isPostponed
                       ? Container(
@@ -1391,13 +1421,26 @@ class _PlansScreenState extends State<PlansScreen> {
                     const SizedBox(width: 4),
                     Expanded(
                       child: Text(
-                        'የማስፈጸሚያ ጊዜ፦ ${item.executionTime}',
+                        'የማስፈጸሚያ ጊዜ፦ ${readableExecutionTime(item.executionTime)}',
                         style: TextStyle(color: Colors.grey.shade700, fontSize: 12),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ],
                 ),
+                if (item.dueDateEthiopian != null && item.dueDateEthiopian!.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Icon(Icons.event, size: 13, color: Colors.grey.shade600),
+                      const SizedBox(width: 4),
+                      Text(
+                        'ቀኑ፦ ${item.dueDateEthiopian}',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                ],
 
                 if (item.isPostponed) ...[
                   const SizedBox(height: 4),
