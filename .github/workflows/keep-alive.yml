@@ -1,0 +1,28 @@
+# Keep the free Render services warm so the app never waits on a cold start.
+#
+# Render free services sleep after 15 minutes idle. Waking the PHP Docker
+# container took ~4.5 minutes on 2026-11-25, while the app's login waited
+# only 10 seconds -- so the first login of the day always failed with a
+# TimeoutException. Pinging every 10 minutes keeps both services awake.
+# The scheduler ping also touches the database, keeping the TiDB path warm
+# (the first DB connection after idle was slow too).
+#
+# Trigger: every 10 minutes, or manually from the Actions tab.
+name: Keep services warm
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ping:
+    name: Ping Render services
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping PHP API health (no DB)
+        run: curl -fsS --max-time 60 https://plan-atsede-php-api.onrender.com/health.php
+      - name: Ping scheduler due list (warms DB path)
+        run: curl -fsS --max-time 90 "https://plan-atsede-php-api.onrender.com/scheduler.php?action=due" -H "X-Bot-Proxy-Secret: ${{ secrets.BOT_PROXY_SECRET }}"
+      - name: Ping bot service
+        run: curl -fsS --max-time 60 https://plan-atsede-teguhan-new.onrender.com/
