@@ -78,9 +78,11 @@ if ($method === 'GET' && $action === 'due') {
     $dueSoon = [];
     $overdue = [];
     foreach ($plans as $p) {
-        // Stored due_date wins; otherwise parse the text on the fly
-        // (old rows written before due_date existed).
-        $due = $p['due_date'] ?: parseEthiopianDate($p['execution_time']);
+        // The date is ALWAYS parsed fresh from the text: the stored
+        // due_date was computed by an older parser (first-date rule)
+        // and is stale for multi-window plans. Stored value is only
+        // a fallback for text the parser cannot read.
+        $due = parseEthiopianDate($p['execution_time']) ?: $p['due_date'];
         if ($due === null) continue; // no readable date — cannot remind
         $reported = in_array($p['latest_report_status'], ['submitted', 'under_review', 'approved'], true);
         if ($reported) continue;
@@ -106,6 +108,12 @@ if ($method === 'GET' && $action === 'due') {
             }
         }
     }
+    // Sort by the (freshly parsed) due date, not the stale column.
+    $byDue = function ($a, $b) {
+        return strcmp($a['due_date'], $b['due_date']) ?: strcmp($a['id'], $b['id']);
+    };
+    usort($dueSoon, $byDue);
+    usort($overdue, $byDue);
 
     jsonResponse([
         'today' => $todayStr,

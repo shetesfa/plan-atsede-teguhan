@@ -36,11 +36,11 @@ if ($method === 'GET') {
 
         // የክፍል ፈቃድ ማረጋገጫ (አስተዳዳሪ ካልሆነ የሌላ ክፍልን የግል እቅድ ማየት አይችልም)
         requireDepartmentOrAdmin($auth, $plan['department_id']);
-        // Audit fix 2026-11-25: fill due_date on the fly for rows
-        // written before due_date existed.
-        if (empty($plan['due_date'])) {
-            $plan['due_date'] = parseEthiopianDate($plan['execution_time']);
-        }
+        // The date is ALWAYS parsed fresh from the text: the stored
+        // due_date was computed by an older parser (first-date rule)
+        // and is stale for multi-window plans. Stored value is only
+        // a fallback for text the parser cannot read.
+        $plan['due_date'] = parseEthiopianDate($plan['execution_time']) ?: $plan['due_date'];
         jsonResponse($plan);
     }
 
@@ -83,12 +83,10 @@ if ($method === 'GET') {
     $stmt->execute($params);
     $plans = $stmt->fetchAll();
 
-    // Audit fix 2026-11-25: fill due_date on the fly for rows written
-    // before due_date existed, so the app sees a real date for every plan.
+    // The date is ALWAYS parsed fresh from the text (see above),
+    // so the app sees the correct date for every plan.
     foreach ($plans as &$p) {
-        if (empty($p['due_date'])) {
-            $p['due_date'] = parseEthiopianDate($p['execution_time']);
-        }
+        $p['due_date'] = parseEthiopianDate($p['execution_time']) ?: $p['due_date'];
     }
     unset($p);
 
