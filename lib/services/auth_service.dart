@@ -32,6 +32,22 @@ class AuthService {
   static bool get isLoggedIn => currentDepartment != null && currentUserProfile != null;
   static bool get isSuperAdmin => currentUserProfile?['is_super_admin'] == true;
 
+  // Audit fix 2026-11-25: the server flags accounts still on their
+  // seed password (users.must_change_password). The app shows the
+  // change-password screen until the flag is cleared.
+  static bool get mustChangePassword =>
+      currentUserProfile?['must_change_password'] == true ||
+      currentUserProfile?['must_change_password'] == 1;
+
+  /// After a successful password change, clear the flag locally
+  /// (the server clears it too; the next profile refresh confirms).
+  static Future<void> clearMustChangePassword() async {
+    if (currentUserProfile == null) return;
+    currentUserProfile!['must_change_password'] = false;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_prefProfileKey, jsonEncode(currentUserProfile));
+  }
+
   static const String _prefDeptKey = 'atsede_current_dept_id';
   static const String _prefProfileKey = 'atsede_current_user_profile';
   static const String _prefSessionExpiryKey = 'atsede_session_expiry';

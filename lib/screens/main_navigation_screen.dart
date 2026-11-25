@@ -15,6 +15,7 @@ import 'office_reports_screen.dart';
 import 'plan_calendar_screen.dart';
 import 'chat_screen.dart';
 import 'login_screen.dart';
+import 'change_password_screen.dart';
 
 class MainNavigationScreen extends StatefulWidget {
   const MainNavigationScreen({super.key});
@@ -99,6 +100,16 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
             selectedDeptForPlans = null;
           });
         },
+      );
+    }
+
+    // Audit fix 2026-11-25: ነባሪ (seed) የይለፍ ቃል ያለው ተጠቃሚ
+    // በመጀመሪያ መግቢያ ላይ የይለፍ ቃል መቀየር አለበት — ይህን ገጽ ሳይቀይር
+    // ወደ ዋናው ገጽ መግባት አይችልም።
+    if (AuthService.mustChangePassword) {
+      return ChangePasswordScreen(
+        mustChange: true,
+        onPasswordChanged: () => setState(() {}),
       );
     }
 

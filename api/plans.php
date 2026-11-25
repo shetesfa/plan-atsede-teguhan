@@ -36,6 +36,11 @@ if ($method === 'GET') {
 
         // የክፍል ፈቃድ ማረጋገጫ (አስተዳዳሪ ካልሆነ የሌላ ክፍልን የግል እቅድ ማየት አይችልም)
         requireDepartmentOrAdmin($auth, $plan['department_id']);
+        // Audit fix 2026-11-25: fill due_date on the fly for rows
+        // written before due_date existed.
+        if (empty($plan['due_date'])) {
+            $plan['due_date'] = parseEthiopianDate($plan['execution_time']);
+        }
         jsonResponse($plan);
     }
 
@@ -77,6 +82,15 @@ if ($method === 'GET') {
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $plans = $stmt->fetchAll();
+
+    // Audit fix 2026-11-25: fill due_date on the fly for rows written
+    // before due_date existed, so the app sees a real date for every plan.
+    foreach ($plans as &$p) {
+        if (empty($p['due_date'])) {
+            $p['due_date'] = parseEthiopianDate($p['execution_time']);
+        }
+    }
+    unset($p);
 
     if ($month && $month !== 'all') {
         $plans = array_values(array_filter($plans, function($p) use ($month) {
