@@ -155,7 +155,7 @@ class ApiService {
           'department_id': usernameOrDept.trim(),
           'password': password, // Never trim password!
         }),
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 60));
 
       final data = jsonDecode(res.body);
       if (res.statusCode == 200 && data['status'] == 'success') {
@@ -175,6 +175,15 @@ class ApiService {
         return {'success': false, 'message': data['message'] ?? 'የመግቢያ ስህተት'};
       }
     } catch (e) {
+      // Render free server sleeps after 15 min idle and takes a while to wake:
+      // a timeout means the server is still waking, not a wrong password.
+      final msg = e.toString();
+      if (msg.contains('TimeoutException')) {
+        return {
+          'success': false,
+          'message': 'ሰርቨሩ እየተነቃ ነው — ትንሽ ቆይተው እንደገና ይሞክሩ።',
+        };
+      }
       return {'success': false, 'message': 'የአገልጋይ ግንኙነት አልተሳካም፦ $e'};
     }
   }
@@ -193,7 +202,7 @@ class ApiService {
   Future<Map<String, dynamic>?> getCurrentUser() async {
     try {
       final uri = Uri.parse('$baseUrl/auth.php?action=me');
-      final res = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 8));
+      final res = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 30));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         if (data['user'] != null && data['user'] is Map) {
@@ -224,7 +233,7 @@ class ApiService {
     final uri = Uri.parse('$baseUrl/plans.php').replace(queryParameters: queryParams);
     http.Response res;
     try {
-      res = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 12));
+      res = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 30));
     } catch (e) {
       lastError = 'የአገልጋይ ግንኙነት አልተሳካም፦ $e';
       debugPrint('fetchPlans network error: $e');
@@ -268,7 +277,7 @@ class ApiService {
         url,
         headers: _headers,
         body: jsonEncode(planData),
-      ).timeout(const Duration(seconds: 12));
+      ).timeout(const Duration(seconds: 30));
 
       final data = jsonDecode(res.body);
       // ማስታወሻ፦ አዲስ እቅድ ሲፈጠር plans.php 201 ይመልሳል (200 አይደለም)።
@@ -291,7 +300,7 @@ class ApiService {
         url,
         headers: _headers,
         body: jsonEncode(documentData),
-      ).timeout(const Duration(seconds: 12));
+      ).timeout(const Duration(seconds: 30));
 
       final data = jsonDecode(res.body);
       // ማስታወሻ፦ አዲስ ሰነድ ሲፈጠር documents.php 201 ይመልሳል (200 አይደለም)።
@@ -309,7 +318,7 @@ class ApiService {
   Future<bool> deletePlan(String planId) async {
     final url = Uri.parse('$baseUrl/plans.php?id=$planId');
     try {
-      final res = await http.delete(url, headers: _headers).timeout(const Duration(seconds: 10));
+      final res = await http.delete(url, headers: _headers).timeout(const Duration(seconds: 30));
       final data = jsonDecode(res.body);
       return res.statusCode == 200 && data['status'] == 'success';
     } catch (e) {
@@ -327,7 +336,7 @@ class ApiService {
 
     final uri = Uri.parse('$baseUrl/reports.php').replace(queryParameters: queryParams);
     try {
-      final res = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 12));
+      final res = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 30));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         if (data['status'] == 'success' && data['data'] is List) {
@@ -348,7 +357,7 @@ class ApiService {
         url,
         headers: _headers,
         body: jsonEncode(reportData),
-      ).timeout(const Duration(seconds: 15));
+      ).timeout(const Duration(seconds: 30));
 
       final data = jsonDecode(res.body);
       if ((res.statusCode == 200 || res.statusCode == 201) && data['status'] == 'success') {
@@ -378,7 +387,7 @@ class ApiService {
           'comment': comment ?? '',
           'reviewer_name': reviewerName ?? (currentUser?['full_name'] ?? 'ፅ/ቤት'),
         }),
-      ).timeout(const Duration(seconds: 12));
+      ).timeout(const Duration(seconds: 30));
 
       final data = jsonDecode(res.body);
       if (res.statusCode == 200 && data['status'] == 'success') {
@@ -398,7 +407,7 @@ class ApiService {
 
     final uri = Uri.parse('$baseUrl/notifications.php').replace(queryParameters: queryParams);
     try {
-      final res = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 8));
+      final res = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 30));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         if (data['status'] == 'success') {
@@ -423,7 +432,7 @@ class ApiService {
           if (markAll) 'mark_all': true,
           if (dept != null) 'department_id': dept,
         }),
-      ).timeout(const Duration(seconds: 8));
+      ).timeout(const Duration(seconds: 30));
       return res.statusCode == 200;
     } catch (_) {
       return false;
@@ -437,7 +446,7 @@ class ApiService {
 
     final uri = Uri.parse('$baseUrl/chat.php').replace(queryParameters: queryParams);
     try {
-      final res = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 10));
+      final res = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 30));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         if (data['status'] == 'success' && data['data'] is List) {
@@ -458,7 +467,7 @@ class ApiService {
         url,
         headers: _headers,
         body: jsonEncode(messageData),
-      ).timeout(const Duration(seconds: 12));
+      ).timeout(const Duration(seconds: 30));
 
       final data = jsonDecode(res.body);
       if (res.statusCode == 200 && data['status'] == 'success') {
@@ -504,7 +513,7 @@ class ApiService {
           'old_password': oldPassword,
           'new_password': newPassword,
         }),
-      ).timeout(const Duration(seconds: 10));
+      ).timeout(const Duration(seconds: 30));
 
       final data = jsonDecode(res.body);
       if (res.statusCode == 200 && data['status'] == 'success') {
