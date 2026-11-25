@@ -41,6 +41,7 @@ if ($method === 'GET') {
         // and is stale for multi-window plans. Stored value is only
         // a fallback for text the parser cannot read.
         $plan['due_date'] = parseEthiopianDate($plan['execution_time']) ?: $plan['due_date'];
+        $plan['due_date_ethiopian'] = formatEthiopianDate($plan['due_date']);
         jsonResponse($plan);
     }
 
@@ -87,6 +88,7 @@ if ($method === 'GET') {
     // so the app sees the correct date for every plan.
     foreach ($plans as &$p) {
         $p['due_date'] = parseEthiopianDate($p['execution_time']) ?: $p['due_date'];
+        $p['due_date_ethiopian'] = formatEthiopianDate($p['due_date']);
     }
     unset($p);
 

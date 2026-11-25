@@ -1,14 +1,9 @@
-import 'dart:convert';
 import 'dart:typed_data';
 import 'package:excel/excel.dart';
-import 'package:flutter/services.dart' show rootBundle;
-import 'package:http/http.dart' as http;
 import '../models/plan_item.dart';
 import '../models/department.dart';
 
 class ExcelImporterService {
-  static const String cloudApiUrl = 'https://plan-atsede-teguhan.onrender.com/api/plans';
-
   static const List<String> monthNames = [
     'መስ', 'ጥቅ', 'ህዳር', 'ታህ', 'ጥር', 'የካ', 'መጋ', 'ሚያ', 'ግን', 'ሰኔ', 'ሐም', 'ነሐ'
   ];
@@ -45,44 +40,20 @@ class ExcelImporterService {
     return 'admin';
   }
 
-  /// የ 10ሩን ክፍሎች እቅዶች ከ assets/default_plans.json ወይም ከተሰጠ ኤክሴል ባይት ይጭናል
+  /// Loads plans from a user-picked Excel file into memory.
+  /// 2026-11-25: the bundled assets/default_plans.json and
+  /// assets/plan_2019.xlsx are NO LONGER used — plans live on the
+  /// online server only (the bot still keeps default_plans.json
+  /// as its own fallback). A picked file is parsed here, but it
+  /// only changes the in-memory list; the server import endpoint
+  /// (api/import_plans.php) is the way Excel plans reach the server.
   static Future<List<PlanItem>> loadPlans({Uint8List? fileBytes}) async {
+    if (fileBytes == null) {
+      return [];
+    }
+
     try {
-      // አዲስ ኤክሴል ፋይል ካልተሰጠ
-      if (fileBytes == null) {
-        // 1. መጀመሪያ ከ Render የቀጥታ ክላውድ ሰርቨር እቅዶችን ለመጫን ይሞክራል
-        try {
-          final res = await http.get(Uri.parse(cloudApiUrl)).timeout(const Duration(seconds: 4));
-          if (res.statusCode == 200) {
-            final data = json.decode(utf8.decode(res.bodyBytes));
-            if (data['status'] == 'success' && data['data'] is List) {
-              final List list = data['data'];
-              if (list.isNotEmpty) {
-                return list.map((e) => PlanItem.fromJson(e)).toList();
-              }
-            }
-          }
-        } catch (_) {}
-
-        // 2. ክላውድ ካልተገኘ ከአካባቢው default_plans.json ይጭናል (Offline Fallback)
-        try {
-          final String jsonStr = await rootBundle.loadString('assets/default_plans.json');
-          final List<dynamic> jsonList = json.decode(jsonStr);
-          return jsonList.map((e) => PlanItem.fromJson(e)).toList();
-        } catch (_) {
-          // fallback to reading excel
-        }
-      }
-
-      Uint8List bytes;
-      if (fileBytes != null) {
-        bytes = fileBytes;
-      } else {
-        final ByteData data = await rootBundle.load('assets/plan_2019.xlsx');
-        bytes = data.buffer.asUint8List();
-      }
-
-      final excel = Excel.decodeBytes(bytes);
+      final excel = Excel.decodeBytes(fileBytes);
       final List<PlanItem> plans = [];
 
       for (var table in excel.tables.keys) {

@@ -27,6 +27,7 @@ class PlanItem {
   String? postponeReason; // የተላለፈበት ምክንያት
   String? originalExecutionTime; // ከመተላለፉ በፊት የነበረው ቀን
   DateTime? dueDate; // ከ execution_time የተተረጎመ እውነተኛ ቀን (Gregorian)
+  String? dueDateEthiopian; // ተመሳሳይ ቀን በኢትዮጵያ አቆጣጠር (ሰርቨር) — ለምሳሌ "የካቲት 28, 2019"
   String? latestReportStatus; // የቅርብ ጊዜ ሪፖርት ሁኔታ (server)
 
   // የተሟላ የእቅድ ክንውን ሪፖርት (Detailed Execution & Shortfall Report)
@@ -56,6 +57,7 @@ class PlanItem {
     this.postponeReason,
     this.originalExecutionTime,
     this.dueDate,
+    this.dueDateEthiopian,
     this.latestReportStatus,
     this.reportDetails,
     this.notDoneDetails,
@@ -259,6 +261,7 @@ class PlanItem {
       postponeReason: json['postpone_reason']?.toString(),
       originalExecutionTime: json['original_execution_time']?.toString(),
       dueDate: json['due_date'] != null ? DateTime.tryParse(json['due_date'].toString()) : null,
+      dueDateEthiopian: json['due_date_ethiopian']?.toString(),
       latestReportStatus: json['latest_report_status']?.toString(),
     );
   }

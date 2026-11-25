@@ -3,7 +3,6 @@ import '../models/plan_item.dart';
 import '../models/unplanned_activity.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
-import '../services/excel_importer.dart';
 import '../theme/app_theme.dart';
 import 'dashboard_screen.dart';
 import 'plans_screen.dart';
@@ -29,6 +28,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   List<PlanItem> plans = [];
   List<UnplannedActivity> unplannedActivities = [];
   bool isLoading = true;
+  String? _serverError;
   String? selectedDeptForPlans;
 
   @override
@@ -38,26 +38,36 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   }
 
   Future<void> _loadInitialPlans() async {
-    setState(() => isLoading = true);
-    try {
-      // መጀመሪያ ከ MySQL / PHP API መጫን
-      final remoteData = await ApiService().getPlans();
-      if (remoteData.isNotEmpty) {
-        final dbPlans = remoteData.map((d) => PlanItem.fromDbJson(d)).toList();
-        setState(() {
-          plans = dbPlans;
-          isLoading = false;
-        });
-        return;
-      }
-    } catch (_) {}
-
-    // አገልጋይ ካልተገኘ ከመስመር ውጭ (Offline) ከአካባቢው ፋይል ይጭናል
-    final loadedPlans = await ExcelImporterService.loadPlans();
     setState(() {
-      plans = loadedPlans;
-      isLoading = false;
+      isLoading = true;
+      _serverError = null;
     });
+    try {
+      // Plans live on the ONLINE server only (2026-11-25).
+      // fetchPlans() throws when the server cannot be reached, so a
+      // failure is visible instead of silently showing stale local data.
+      final remoteData = await ApiService().fetchPlans();
+      final dbPlans = remoteData.map((d) => PlanItem.fromDbJson(d)).toList();
+      setState(() {
+        plans = dbPlans;
+        isLoading = false;
+      });
+    } on ApiException catch (e) {
+      // Server unreachable: show the error + retry. NEVER fall back
+      // to the bundled Excel/JSON — the app must not show plans
+      // that are not on the server.
+      setState(() {
+        plans = [];
+        _serverError = e.message;
+        isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        plans = [];
+        _serverError = e.toString();
+        isLoading = false;
+      });
+    }
   }
 
   void _onSelectDepartmentFromDashboard(String departmentId) {
@@ -126,6 +136,44 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
               ),
             ],
+          ),
+        ),
+      );
+    }
+
+    // Server could not be reached: plans live on the server only,
+    // so there is nothing local to show — offer a retry instead.
+    if (_serverError != null) {
+      return Scaffold(
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.cloud_off, size: 48, color: Colors.grey),
+                const SizedBox(height: 16),
+                const Text(
+                  'ሰርቨሩ አልተገኘም',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'እቅዶች በሰርቨሩ ላይ ብቻ ናቸው — እባክዎ ኢንተርኔትዎን ይፈትሹ እና እንደገና ይሞክሩ።',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 13),
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: _loadInitialPlans,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryMaroon,
+                    foregroundColor: Colors.white,
+                  ),
+                  child: const Text('እንደገና ሞክር'),
+                ),
+              ],
+            ),
           ),
         ),
       );

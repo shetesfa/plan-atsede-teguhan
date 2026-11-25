@@ -59,6 +59,47 @@ function ethiopianToGregorian(int $ethYear, int $month, int $day): ?DateTimeImmu
     return $start->modify('+' . (($month - 1) * 30 + ($day - 1)) . ' days');
 }
 
+/** Ethiopian new-year start (Gregorian Sep 11, or Sep 12 when that Ethiopian year % 4 == 0). */
+function ethiopianNewYearStart(int $gregorianYear): DateTimeImmutable {
+    $ethYear = $gregorianYear - 7;
+    $day = ($ethYear % 4 === 0) ? 12 : 11;
+    return new DateTimeImmutable(sprintf('%04d-09-%02d', $gregorianYear, $day), new DateTimeZone('Africa/Addis_Ababa'));
+}
+
+/** Full Ethiopian month names by number (for display). */
+function ethiopianMonthFullName(int $month): string {
+    $names = [1 => 'መስከረም', 2 => 'ጥቅምት', 3 => 'ህዳር', 4 => 'ታህሳስ', 5 => 'ጥር', 6 => 'የካቲት', 7 => 'መጋቢት', 8 => 'ሚያዝያ', 9 => 'ግንቦት', 10 => 'ሰኔ', 11 => 'ሐምሌ', 12 => 'ነሐሴ', 13 => 'ጳጉሜ'];
+    return $names[$month] ?? '';
+}
+
+/**
+ * Gregorian 'Y-m-d' => Ethiopian (year, month, day), or null.
+ * The reverse of ethiopianToGregorian: the Ethiopian year in force
+ * is the one whose new year (Sep 11/12) most recently passed.
+ */
+function gregorianToEthiopian(?string $gregorianDate): ?array {
+    if (!$gregorianDate) return null;
+    $d = DateTimeImmutable::createFromFormat('Y-m-d', substr($gregorianDate, 0, 10), new DateTimeZone('Africa/Addis_Ababa'));
+    if (!$d) return null;
+    $y = (int)$d->format('Y');
+    $start = ethiopianNewYearStart($y);
+    if ($d < $start) {
+        $ethYear = $y - 8;
+        $start = ethiopianNewYearStart($y - 1);
+    } else {
+        $ethYear = $y - 7;
+    }
+    $days = (int)$start->diff($d)->format('%a');
+    return ['year' => $ethYear, 'month' => intdiv($days, 30) + 1, 'day' => $days % 30 + 1];
+}
+
+/** Gregorian 'Y-m-d' => readable Ethiopian date, e.g. "የካቲት 28, 2019". */
+function formatEthiopianDate(?string $gregorianDate): ?string {
+    $e = gregorianToEthiopian($gregorianDate);
+    if (!$e) return null;
+    return ethiopianMonthFullName($e['month']) . ' ' . $e['day'] . ', ' . $e['year'];
+}
+
 /**
  * Best-effort parse of a free-text Ethiopian date.
  * Returns a 'Y-m-d' Gregorian date string, or null when the text
