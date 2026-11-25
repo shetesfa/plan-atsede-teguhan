@@ -383,4 +383,22 @@ if ($method === 'POST' && $action === 'review') {
     }
 }
 
+// 4. ሪፖርት መሰረዝ (DELETE Report — ፅ/ቤት ብቻ፤ soft delete)
+// Audit fix 2026-11-25: there was no way to remove a report at all
+// (the live test report could only be deleted straight from the DB).
+if ($method === 'DELETE') {
+    requireSuperAdmin($auth);
+    $id = $_GET['id'] ?? (getJsonInput()['id'] ?? null);
+
+    if (empty($id)) {
+        jsonError('የሪፖርት መለያ (id) ያስፈልጋል', 400);
+    }
+
+    $stmt = $pdo->prepare("UPDATE reports SET is_deleted = 1, version = version + 1 WHERE id = ?");
+    $stmt->execute([$id]);
+
+    logAudit($pdo, 'delete_report', 'reports', $id, $auth['user_id'], $auth['department_id']);
+    jsonResponse(['message' => 'ሪፖርቱ በተሳካ ሁኔታ ተሰርዟል', 'id' => $id]);
+}
+
 jsonError('ያልተፈቀደ ጥያቄ ወይም ዘዴ', 405);

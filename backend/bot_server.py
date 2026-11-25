@@ -368,6 +368,110 @@ def proxy_get_updates():
         return jsonify({"ok": False, "description": str(e)}), 500
 
 # ==============================================================
+# ማሳሰቢያ መርሐግብር (Reminder Scheduler — audit fix 2026-11-25)
+# POST /api/scheduler/run — one pass: ask the PHP API which
+# plans are due soon / overdue without a report, send the
+# Telegram reminders + office escalations, mark them sent.
+# Called once an hour by a GitHub Actions workflow (the free
+# Render service sleeps, so no in-process scheduler can be
+# trusted to wake up on its own). Same proxy-secret auth as
+# the other proxy endpoints. The PHP side dedups: one reminder
+# and one escalation per plan per day.
+# ==============================================================
+import html as _html
+
+
+def _send_telegram_message(text):
+    """Send one Telegram message via the server bot token. True on success."""
+    if not BOT_TOKEN:
+        return False
+    try:
+        res = requests.post(f"{BASE_URL}/sendMessage", json={
+            "chat_id": CHAT_ID,
+            "text": text,
+            "parse_mode": "HTML"
+        }, timeout=15)
+        data = res.json()
+        return res.status_code == 200 and data.get("ok") is True
+    except Exception as e:
+        print(f"Scheduler send error: {e}")
+        return False
+
+
+@app.route("/api/scheduler/run", methods=["POST", "OPTIONS"])
+def scheduler_run():
+    if request.method == "OPTIONS":
+        return "", 200
+    auth_error = require_proxy_auth()
+    if auth_error is not None:
+        return auth_error
+    if not BOT_TOKEN:
+        return jsonify({"ok": False, "description": "Bot token not configured on server"}), 500
+    if not PHP_API_BASE or " " in PHP_API_BASE:
+        return jsonify({"ok": False, "description": "PHP_API_BASE not configured on server"}), 500
+    if not CHAT_ID:
+        return jsonify({"ok": False, "description": "CHAT_ID not configured on server"}), 500
+
+    try:
+        due_res = requests.get(
+            f"{PHP_API_BASE.rstrip('/')}/scheduler.php?action=due",
+            headers={"X-Bot-Proxy-Secret": BOT_PROXY_SECRET},
+            timeout=25,
+        )
+        due_data = due_res.json()
+    except Exception as e:
+        return jsonify({"ok": False, "description": f"PHP scheduler unreachable: {e}"}), 502
+    if due_res.status_code != 200 or due_data.get("status") != "success":
+        return jsonify({"ok": False, "description": "PHP scheduler error", "detail": str(due_data)[:200]}), 502
+
+    payload = due_data.get("data", {}) or {}
+    due_soon = payload.get("due_soon", []) or []
+    overdue = payload.get("overdue", []) or []
+
+    sent_items = []
+    failed = []
+    for plan in due_soon:
+        dept = _html.escape(str(plan.get("department_name") or plan.get("department_id") or ""))
+        task = _html.escape(str(plan.get("main_task") or plan.get("detail_task") or "እቅድ"))
+        when = _html.escape(str(plan.get("execution_time") or ""))
+        text = (f"⏰ <b>ማሳሰቢያ</b>\nየ<b>{dept}</b> እቅድ “{task}” ቀኑ <b>{when}</b> ነው። "
+                f"ሪፖርት ገና አልገባም — እባክዎ ሪፖርት ያስገቡ።")
+        if _send_telegram_message(text):
+            sent_items.append({"plan_id": plan["id"], "kind": "reminder"})
+        else:
+            failed.append({"plan_id": plan["id"], "kind": "reminder"})
+    for plan in overdue:
+        dept = _html.escape(str(plan.get("department_name") or plan.get("department_id") or ""))
+        task = _html.escape(str(plan.get("main_task") or plan.get("detail_task") or "እቅድ"))
+        when = _html.escape(str(plan.get("execution_time") or ""))
+        text = (f"🚨 <b>ለፅ/ቤት ማሳሰቢያ — ሪፖርት ዘግይቷል</b>\nየ<b>{dept}</b> እቅድ “{task}” "
+                f"ቀኑ አልፏል (<b>{when}</b>) እና ሪፖርት አልተላከም። እባክዎ ክፍሉን ያነጋግሩ።")
+        if _send_telegram_message(text):
+            sent_items.append({"plan_id": plan["id"], "kind": "escalation"})
+        else:
+            failed.append({"plan_id": plan["id"], "kind": "escalation"})
+
+    if sent_items:
+        try:
+            requests.post(
+                f"{PHP_API_BASE.rstrip('/')}/scheduler.php?action=mark_sent",
+                headers={"X-Bot-Proxy-Secret": BOT_PROXY_SECRET, "Content-Type": "application/json"},
+                json={"items": sent_items},
+                timeout=15,
+            )
+        except Exception as e:
+            print(f"Scheduler mark_sent error: {e}")
+
+    return jsonify({
+        "ok": True,
+        "today": payload.get("today"),
+        "due_soon": len(due_soon),
+        "overdue": len(overdue),
+        "sent": len(sent_items),
+        "failed": failed,
+    }), 200
+
+# ==============================================================
 # የቴሌግራም ቦት አዳማጭ ሉፕ (Telegram Polling Loop)
 # ==============================================================
 def send_telegram_reply(chat_id, text, reply_to_message_id=None):
