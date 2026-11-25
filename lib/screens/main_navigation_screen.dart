@@ -284,227 +284,324 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     );
   }
 }
-
 class DocumentsHubScreen extends StatelessWidget {
   final VoidCallback onOpenUnplanned;
-
   const DocumentsHubScreen({super.key, required this.onOpenUnplanned});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('ይፋዊ ሰነዶች እና ስራዎች ማዘጋጃ'),
-      ),
+      backgroundColor: AppTheme.surfaceBg,
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
-              'የሚፈልጉትን አገልግሎት ይምረጡ፡',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppTheme.primaryMaroon),
-            ),
-            const SizedBox(height: 14),
-
-            // 0. የፅ/ቤት ክንውን ሪፖርቶች መገምገሚያ ካርድ
-            Card(
-              child: ListTile(
-                contentPadding: const EdgeInsets.all(16),
-                leading: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primaryMaroon.withAlpha(25),
-                    shape: BoxShape.circle,
+            _buildLetterheadHeader(context),
+            const SizedBox(height: 18),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 20),
+              child: Row(
+                children: [
+                  Text(
+                    'የሚፈልጉትን አገልግሎት ይምረጡ',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                      color: AppTheme.primaryMaroon,
+                    ),
                   ),
-                  child: const Icon(Icons.rate_review_outlined, color: AppTheme.primaryMaroon, size: 26),
-                ),
-                title: const Text(
-                  'የክንውን ሪፖርቶች መገምገሚያ (Office Review)',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                ),
-                subtitle: const Padding(
-                  padding: EdgeInsets.only(top: 4),
-                  child: Text(
-                    'በክፍሎች የቀረቡ የክንውን ሪፖርቶችን ይገምግሙ፣ ያጽድቁ፣ ወይም ማሻሻያ አስተያየት ይስጡ።',
-                    style: TextStyle(fontSize: 12),
-                  ),
-                ),
-                trailing: const Icon(Icons.arrow_forward_ios, size: 14),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (ctx) => const OfficeReportsScreen()),
-                  );
-                },
+                  SizedBox(width: 8),
+                  Expanded(child: Divider(color: AppTheme.secondaryGold, thickness: 1.5)),
+                ],
               ),
             ),
             const SizedBox(height: 12),
-
-            // ደብዳቤ ካርድ
-            Card(
-              child: ListTile(
-                contentPadding: const EdgeInsets.all(16),
-                leading: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primaryMaroon.withAlpha(20),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.mail_outline, color: AppTheme.primaryMaroon, size: 26),
-                ),
-                title: const Text(
-                  'ይፋዊ ደብዳቤ መጻፊያ',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                ),
-                subtitle: const Padding(
-                  padding: EdgeInsets.only(top: 4),
-                  child: Text(
-                    'ለማንኛውም አካል በአጸደ ትጉሃን አርማ እና ፎርማት ይፋዊ ደብዳቤ አዘጋጅተው ወደ PDF ያውጡ።',
-                    style: TextStyle(fontSize: 12),
-                  ),
-                ),
-                trailing: const Icon(Icons.arrow_forward_ios, size: 14),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (ctx) => const LetterGeneratorScreen()),
-                  );
-                },
+            _paperCard(
+              context: context,
+              icon: Icons.rate_review_outlined,
+              iconColor: AppTheme.primaryMaroon,
+              title: 'የክንውን ሪፖርቶች መገምገሚያ (Office Review)',
+              subtitle: 'በክፍሎች የቀረቡ የክንውን ሪፖርቶችን ይገምግሙ፣ ያጽድቁ፣ ወይም ማሻሻያ አስተያየት ይስጡ።',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (ctx) => const OfficeReportsScreen()),
               ),
             ),
-            const SizedBox(height: 12),
-
-            // ፕሮፖዛል ካርድ
-            Card(
-              child: ListTile(
-                contentPadding: const EdgeInsets.all(16),
-                leading: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: AppTheme.secondaryGold.withAlpha(30),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.assignment_outlined, color: AppTheme.secondaryGold, size: 26),
-                ),
-                title: const Text(
-                  'ይፋዊ ፕሮፖዛል ማዘጋጃ',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                ),
-                subtitle: const Padding(
-                  padding: EdgeInsets.only(top: 4),
-                  child: Text(
-                    'ለበዓላት ወይም ለስራዎች የበጀት ሰንጠረዥ የያዘ ይፋዊ ፕሮፖዛል አዘጋጅተው ወደ PDF ያውጡ።',
-                    style: TextStyle(fontSize: 12),
-                  ),
-                ),
-                trailing: const Icon(Icons.arrow_forward_ios, size: 14),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (ctx) => const ProposalGeneratorScreen()),
-                  );
-                },
+            _paperCard(
+              context: context,
+              icon: Icons.mail_outline,
+              iconColor: AppTheme.primaryMaroon,
+              title: 'ይፋዊ ደብዳቤ መጻፊያ',
+              subtitle: 'ለማንኛውም አካል በአጸደ ትጉሃን አርማ እና ፎርማት ይፋዊ ደብዳቤ አዘጋጅተው ወደ PDF ያውጡ።',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (ctx) => const LetterGeneratorScreen()),
               ),
             ),
-            const SizedBox(height: 12),
-
-            // ያልታቀደ ግን የተከናወነ ስራ ካርድ
-            Card(
-              child: ListTile(
-                contentPadding: const EdgeInsets.all(16),
-                leading: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: AppTheme.greenSuccess.withAlpha(25),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.playlist_add_check, color: AppTheme.greenSuccess, size: 26),
-                ),
-                title: const Text(
-                  'ያልታቀዱ ግን የተከናወኑ ስራዎች',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                ),
-                subtitle: const Padding(
-                  padding: EdgeInsets.only(top: 4),
-                  child: Text(
-                    'በዓመታዊ እቅድ ውስጥ ያልነበሩ ነገር ግን በድንገት የተከናወኑ ተግባራትን መዝግበው ለፅ/ቤት ያቅርቡ።',
-                    style: TextStyle(fontSize: 12),
-                  ),
-                ),
-                trailing: const Icon(Icons.arrow_forward_ios, size: 14),
-                onTap: onOpenUnplanned,
+            _paperCard(
+              context: context,
+              icon: Icons.assignment_outlined,
+              iconColor: AppTheme.secondaryGold,
+              title: 'ይፋዊ ፕሮፖዛል ማዘጋጃ',
+              subtitle: 'ለበዓላት ወይም ለስራዎች የበጀት ሰንጠረዥ የያዘ ይፋዊ ፕሮፖዛል አዘጋጅተው ወደ PDF ያውጡ።',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (ctx) => const ProposalGeneratorScreen()),
               ),
             ),
-            const SizedBox(height: 12),
-
-            // 1. Word ሰነድ መጻፊያ ካርድ
-            Card(
-              child: ListTile(
-                contentPadding: const EdgeInsets.all(16),
-                leading: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF2B579A).withAlpha(25),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.description, color: Color(0xFF2B579A), size: 28),
-                ),
-                title: const Text(
-                  'Word የጽሑፍ ሰነድ መጻፊያ',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                ),
-                subtitle: const Padding(
-                  padding: EdgeInsets.only(top: 4),
-                  child: Text(
-                    'ኮምፒውተር ሳይኖር በስልክዎ በቀላሉ የክንውን ሪፖርት፣ ቃለ-ጉባኤ እና ማስታወሻዎችን አዘጋጅተው ወደ PDF እና ቴሌግራም ያውጡ።',
-                    style: TextStyle(fontSize: 12),
-                  ),
-                ),
-                trailing: const Icon(Icons.arrow_forward_ios, size: 14),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (ctx) => const DocumentEditorScreen(initialTabIndex: 0)),
-                  );
-                },
+            _paperCard(
+              context: context,
+              icon: Icons.playlist_add_check,
+              iconColor: AppTheme.greenSuccess,
+              title: 'ያልታቀዱ ግን የተከናወኑ ስራዎች',
+              subtitle: 'በዓመታዊ እቅድ ውስጥ ያልነበሩ ነገር ግን በድንገት የተከናወኑ ተግባራትን መዝግበው ለፅ/ቤት ያቅርቡ።',
+              onTap: onOpenUnplanned,
+            ),
+            _paperCard(
+              context: context,
+              icon: Icons.description,
+              iconColor: const Color(0xFF2B579A),
+              title: 'Word የጽሑፍ ሰነድ መጻፊያ',
+              subtitle: 'ኮምፒውተር ሳይኖር በስልክዎ በቀላሉ የክንውን ሪፖርት፣ ቃለ-ጉባኤ እና ማስታወሻዎችን አዘጋጅተው ወደ PDF እና ቴሌግራም ያውጡ።',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (ctx) => const DocumentEditorScreen(initialTabIndex: 0)),
               ),
             ),
-            const SizedBox(height: 12),
-
-            // 2. Excel ሰንጠረዥና በጀት ሰሪ ካርድ
-            Card(
-              child: ListTile(
-                contentPadding: const EdgeInsets.all(16),
-                leading: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF217346).withAlpha(25),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.table_chart_rounded, color: Color(0xFF217346), size: 28),
-                ),
-                title: const Text(
-                  'Excel የሰንጠረዥና የበጀት ሰሪ',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                ),
-                subtitle: const Padding(
-                  padding: EdgeInsets.only(top: 4),
-                  child: Text(
-                    'የእቃ፣ የስራና የወጪ ዝርዝር ሰንጠረዥ አዘጋጅተው ዋጋውን በራስ-ሰር (Auto-sum) አስልተው ወደ PDF ያውጡ።',
-                    style: TextStyle(fontSize: 12),
-                  ),
-                ),
-                trailing: const Icon(Icons.arrow_forward_ios, size: 14),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (ctx) => const DocumentEditorScreen(initialTabIndex: 1)),
-                  );
-                },
+            _paperCard(
+              context: context,
+              icon: Icons.table_chart_rounded,
+              iconColor: const Color(0xFF217346),
+              title: 'Excel የሰንጠረዥና የበጀት ሰሪ',
+              subtitle: 'የእቃ፣ የስራና የወጪ ዝርዝር ሰንጠረዥ አዘጋጅተው ዋጋውን በራስ-ሰር (Auto-sum) አስልተው ወደ PDF ያውጡ።',
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (ctx) => const DocumentEditorScreen(initialTabIndex: 1)),
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(24, 4, 24, 28),
+              child: Text(
+                'ሁሉም ሰነዶች በቤተክርስቲያኗ አርማ እና ይፋዊ ፎርማት ወደ PDF ይወጣሉ።',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 11, color: AppTheme.textMuted),
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// የቤተክርስቲያኗ ይፋዊ አርማ ያለው የሰነድ ራስጌ (Letterhead)።
+  Widget _buildLetterheadHeader(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [AppTheme.darkMaroon, AppTheme.primaryMaroon],
+        ),
+        border: Border(
+          bottom: BorderSide(color: AppTheme.secondaryGold, width: 3),
+        ),
+      ),
+      padding: EdgeInsets.fromLTRB(
+        20,
+        MediaQuery.of(context).padding.top + 18,
+        20,
+        22,
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 96,
+            height: 96,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.white,
+              border: Border.all(color: AppTheme.secondaryGold, width: 3.5),
+              boxShadow: [
+                BoxShadow(
+                  color: AppTheme.secondaryGold.withAlpha(120),
+                  blurRadius: 24,
+                  spreadRadius: 2,
+                ),
+                BoxShadow(
+                  color: Colors.black.withAlpha(60),
+                  blurRadius: 16,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+            ),
+            padding: const EdgeInsets.all(4),
+            child: ClipOval(
+              child: Image.asset(
+                'assets/icon.png',
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) => const Icon(
+                  Icons.church_rounded,
+                  size: 56,
+                  color: AppTheme.primaryMaroon,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'አጸደ ትጉሃን ሰንበት ት/ቤት',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 20,
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'ይፋዊ ሰነዶች እና ስራዎች ማዘጋጃ',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppTheme.secondaryGold,
+              fontWeight: FontWeight.w600,
+              fontSize: 14,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Container(width: 64, height: 2, color: AppTheme.secondaryGold),
+          const SizedBox(height: 10),
+          const Text(
+            'የቤተክርስቲያኗ ይፋዊ ሰነዶች ብቻ',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// የወረቀት ገጽ የሚመስል ሰነድ ካርድ — ከላይ የቤተክርስቲያኗ አርማ ያለው
+  /// ራስጌ (letterhead) እና የወርቅ መስመር አለው፣ ልክ እንደ Word ገጽ።
+  Widget _paperCard({
+    required BuildContext context,
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+      child: Material(
+        color: Colors.white,
+        elevation: 3,
+        shadowColor: Colors.black.withAlpha(40),
+        borderRadius: BorderRadius.circular(16),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // የሰነድ ራስጌ — አርማ + የቤተክርስቲያኗ ስም (ልክ እንደ እውነተኛ ወረቀት)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.white,
+                        border: Border.all(color: AppTheme.secondaryGold, width: 1.5),
+                      ),
+                      padding: const EdgeInsets.all(1),
+                      child: ClipOval(
+                        child: Image.asset(
+                          'assets/icon.png',
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, __, ___) => const Icon(
+                            Icons.church_rounded,
+                            size: 16,
+                            color: AppTheme.primaryMaroon,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        'አጸደ ትጉሃን ሰንበት ት/ቤት',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.primaryMaroon,
+                        ),
+                      ),
+                    ),
+                    const Text(
+                      'ይፋዊ',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.secondaryGold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(14, 8, 14, 0),
+                child: Divider(color: AppTheme.secondaryGold, thickness: 1, height: 1),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(14),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 52,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        color: iconColor.withAlpha(25),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(icon, color: iconColor, size: 26),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                              color: AppTheme.textDark,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            subtitle,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppTheme.textSecondary,
+                              height: 1.4,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    const Icon(Icons.arrow_forward_ios, size: 14, color: AppTheme.textMuted),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
