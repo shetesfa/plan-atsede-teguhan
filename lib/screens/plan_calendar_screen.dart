@@ -5,6 +5,7 @@ import '../models/plan_item.dart';
 import '../services/auth_service.dart';
 import '../services/pdf_generator_service.dart';
 import '../services/telegram_service.dart';
+import '../utils/ethiopian_date_display.dart';
 import '../widgets/telegram_connect_dialog.dart';
 import '../theme/app_theme.dart';
 
@@ -32,7 +33,7 @@ class _PlanCalendarScreenState extends State<PlanCalendarScreen> {
     'መስ', 'ጥቅ', 'ህዳር', 'ታህ', 'ጥር', 'የካ', 'መጋ', 'ሚያ', 'ግን', 'ሰኔ', 'ሐም', 'ነሐ'
   ];
 
-  int selectedMonthIndex = 1; // ነባሪ፦ ጥቅምት
+  int selectedMonthIndex = currentEthiopianMonthIndex(); // ነባሪ፦ አሁን ያለንበት ወር
   String selectedFilter = 'all'; // 'all', 'overdue', 'postponed', 'reported', 'completed'
   String? selectedDeptId;
 
