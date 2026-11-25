@@ -33,6 +33,16 @@ jobs:
           channel: stable
       - name: Install dependencies
         run: flutter pub get
+      - name: Diagnose keystore secret (temporary)
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "len=${#ANDROID_KEYSTORE_BASE64}"
+          echo "mod4=$(( ${#ANDROID_KEYSTORE_BASE64} % 4 ))"
+          echo "newlines=$(printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -cd '\n' | wc -c)"
+          echo "spaces=$(printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -cd ' ' | wc -c)"
+          echo "invalid=$(printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d 'A-Za-z0-9+/=' | wc -c)"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > /tmp/test.p12 && echo "decode_ok size=$(stat -c%s /tmp/test.p12)" || echo "decode_fail"
       - name: Decode release keystore
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
