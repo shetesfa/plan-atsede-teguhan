@@ -3,6 +3,7 @@ import '../models/department.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/ethiopian_date_display.dart';
 
 class OfficeReportsScreen extends StatefulWidget {
   const OfficeReportsScreen({super.key});
@@ -292,7 +293,7 @@ class _OfficeReportsScreenState extends State<OfficeReportsScreen> {
                                   ),
                                   const SizedBox(height: 6),
                                   Text(
-                                    '🏛️ ${r['department_name'] ?? r['department_id']} | 👤 ${r['submitted_by'] ?? 'አባል'} | 📅 ${(r['created_at'] ?? '').toString().split(' ')[0]}',
+                                    '🏛️ ${r['department_name'] ?? r['department_id']} | 👤 ${r['submitted_by'] ?? 'አባል'} | 📅 ${formatGregorianDateStringEthiopian((r['created_at'] ?? '').toString())}',
                                     style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
                                   ),
                                   const SizedBox(height: 8),

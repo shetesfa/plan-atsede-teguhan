@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models/department.dart';
 import '../models/plan_item.dart';
+import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/pdf_generator_service.dart';
 import '../services/telegram_service.dart';
@@ -189,7 +190,7 @@ class _PlanCalendarScreenState extends State<PlanCalendarScreen> {
         overdueCount: overdueList.length,
       );
 
-      final fileName = 'የክፍላት_አፈፃፀም_ግምገማ_${periodName}_2019.pdf';
+      final fileName = 'የክፍላት_አፈፃፀም_ግምገማ_${periodName}_${currentEthiopianYear()}.pdf';
       await PdfGeneratorService.printOrSharePdf(pdfBytes, fileName);
 
       if (mounted) {
@@ -384,11 +385,50 @@ class _PlanCalendarScreenState extends State<PlanCalendarScreen> {
                                 final currentDept = AuthService.currentDepartment;
                                 final isSuper = AuthService.isSuperAdmin;
                                 final senderTitle = isSuper ? 'የጽ/ቤት ዋና ጸሐፊ' : '${currentDept?.shortName ?? item.departmentName} ኃላፊ';
+                                final doneDetails = doneController.text.trim();
+                                final notDoneDetails = notDoneController.text.trim();
+                                final taskTitle = item.detailTask.isNotEmpty ? item.detailTask : item.mainTask;
+
+                                // H1(c)፦ ሪፖርቱ መጀመሪያ ወደ አገልጋዩ (reports.php) ይላካል።
+                                // "ተመዝግቧል" የሚለው መልእክት የሚታየው አገልጋዩ ካረጋገጠ በኋላ ብቻ ነው።
+                                // ከዚህ በፊት እዚህ ሞዳል አገልጋዩን ሳያነጋግር በአካባቢው ብቻ
+                                // ይቀይር ነበር — ስለዚህ ሪፖርቱ ወደ Office Review በጭራሽ
+                                // አይደርስም ነበር።
+                                final reportPayload = <String, dynamic>{
+                                  'plan_id': item.id,
+                                  'department_id': item.departmentId,
+                                  'title': taskTitle,
+                                  // reports.php የተከናወነ ዝርዝር ባዶ ከሆነ 400 ይመልሳል፤
+                                  // ስለዚህ ባዶ ከሆነ የአፈፃፀም ደረጃውን እንደ ማብራሪያ እንልካለን።
+                                  'activities_completed': doneDetails.isNotEmpty
+                                      ? doneDetails
+                                      : 'የአፈፃፀም ደረጃ፦ $currentPercent%',
+                                  'progress_percent': currentPercent,
+                                  'challenges': notDoneDetails,
+                                  'solutions_proposed': '',
+                                  'status': 'submitted',
+                                };
+
+                                final result = await ApiService().submitReport(reportPayload);
+                                final submitted = result['success'] == true;
+
+                                if (!submitted) {
+                                  if (context.mounted) {
+                                    setModalState(() => isSubmitting = false);
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('ሪፖርቱ ወደ ሰርቨር አልተላከም፦ ${result['message'] ?? 'እባክዎ እንደገና ይሞክሩ'}'),
+                                        backgroundColor: AppTheme.redDanger,
+                                      ),
+                                    );
+                                  }
+                                  return;
+                                }
 
                                 item.progressPercent = currentPercent;
-                                item.reportDetails = doneController.text.trim();
-                                item.notDoneDetails = notDoneController.text.trim();
-                                item.reason = notDoneController.text.trim();
+                                item.reportDetails = doneDetails;
+                                item.notDoneDetails = notDoneDetails;
+                                item.reason = notDoneDetails;
                                 item.evidencePath = pickedImagePath;
                                 item.reportSubmittedAt = DateTime.now();
                                 item.submittedBy = senderTitle;
@@ -399,10 +439,10 @@ class _PlanCalendarScreenState extends State<PlanCalendarScreen> {
                                 await TelegramService.sendPlanReportNotice(
                                   deptName: item.departmentName,
                                   senderTitle: senderTitle,
-                                  taskTitle: item.detailTask.isNotEmpty ? item.detailTask : item.mainTask,
+                                  taskTitle: taskTitle,
                                   progressPercent: currentPercent,
-                                  doneDetails: item.reportDetails ?? '',
-                                  notDoneDetails: item.notDoneDetails,
+                                  doneDetails: doneDetails,
+                                  notDoneDetails: notDoneDetails.isEmpty ? null : notDoneDetails,
                                 );
 
                                 if (context.mounted) {
@@ -542,9 +582,54 @@ class _PlanCalendarScreenState extends State<PlanCalendarScreen> {
                                 final currentDept = AuthService.currentDepartment;
                                 final isSuper = AuthService.isSuperAdmin;
                                 final senderTitle = isSuper ? 'የጽ/ቤት ዋና ጸሐፊ' : '${currentDept?.shortName ?? item.departmentName} ኃላፊ';
+                                final postponeReason = reasonController.text.trim();
 
+                                // H1(e)፦ ማስተላለፉ መጀመሪያ ወደ አገልጋዩ (plans.php) ይቀመጣል።
+                                // ከዚህ በፊት እዚህ ሞዳል አገልጋዩን ሳያነጋግር በአካባቢው ብቻ
+                                // ይቀይር ነበር — ስለዚህ ማስተላለፉ አፕሉን እንደገና ሲከፍት
+                                // ይጠፋና እቅዱ አሁንም ያዘገየ ሆኖ ይታይ ነበር።
+                                // plans.php ያለውን እቅድ ሲያሻሽል ሁሉንም መስኮች ስለሚተካ
+                                // ያሉትን እሴቶች ሁሉ እንልካለን — አለበለዚያ ይጠፋሉ።
+                                final planPayload = <String, dynamic>{
+                                  'id': item.id,
+                                  'department_id': item.departmentId,
+                                  'sub_department': item.subDepartment,
+                                  'main_task': item.mainTask,
+                                  'detail_task': item.detailTask,
+                                  'measurement': item.measurement,
+                                  'quantity': item.quantity,
+                                  'execution_time': newDate,
+                                  'target_date': newDate,
+                                  'budget': item.budget,
+                                  'remarks': postponeReason.isNotEmpty ? postponeReason : item.remarks,
+                                  'progress_percent': item.progressPercent,
+                                  'original_execution_time': item.executionTime,
+                                  'postponed_date': newDate,
+                                  'postpone_reason': postponeReason,
+                                  'is_postponed': true,
+                                };
+
+                                final oldDate = item.executionTime;
+                                final result = await ApiService().savePlan(planPayload);
+                                final saved = result['success'] == true;
+
+                                if (!saved) {
+                                  if (context.mounted) {
+                                    setModalState(() => isSubmitting = false);
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text('ማስተላለፉ ወደ ሰርቨር አልተላከም፦ ${result['message'] ?? 'እባክዎ እንደገና ይሞክሩ'}'),
+                                        backgroundColor: AppTheme.redDanger,
+                                      ),
+                                    );
+                                  }
+                                  return;
+                                }
+
+                                item.originalExecutionTime = oldDate;
+                                item.executionTime = newDate;
                                 item.postponedDate = newDate;
-                                item.postponeReason = reasonController.text.trim();
+                                item.postponeReason = postponeReason;
                                 item.updatedAt = DateTime.now();
 
                                 widget.onUpdatePlan(item);
@@ -553,9 +638,9 @@ class _PlanCalendarScreenState extends State<PlanCalendarScreen> {
                                   deptName: item.departmentName,
                                   senderTitle: senderTitle,
                                   taskTitle: item.detailTask.isNotEmpty ? item.detailTask : item.mainTask,
-                                  originalDate: item.executionTime,
+                                  originalDate: oldDate,
                                   newDate: newDate,
-                                  reason: item.postponeReason ?? 'ምክንያት አልተገለጸም',
+                                  reason: postponeReason.isNotEmpty ? postponeReason : 'ምክንያት አልተገለጸም',
                                 );
 
                                 if (context.mounted) {

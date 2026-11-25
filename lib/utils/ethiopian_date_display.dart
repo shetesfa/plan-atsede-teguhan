@@ -29,6 +29,48 @@ const List<String> ethiopianMonths13 = [
   'መጋቢት', 'ሚያዝያ', 'ግንቦት', 'ሰኔ', 'ሐምሌ', 'ነሐሴ', 'ጳጉሜ',
 ];
 
+/// Gregorian date -> Ethiopian (year, month index 0-12, day).
+/// Port of api/ethiopian_date.php gregorianToEthiopian: the Ethiopian
+/// new year falls on Sep 11 (Sep 12 when the Ethiopian year is a leap
+/// year, ethYear % 4 == 0); months are 30 days, Pagume is the 13th.
+({int year, int monthIndex, int day}) ethiopianDateParts(DateTime date) {
+  final d = DateTime(date.year, date.month, date.day);
+  var ethYear = d.year - 7;
+  var start = DateTime(d.year, 9, (ethYear % 4 == 0) ? 12 : 11);
+  if (d.isBefore(start)) {
+    ethYear -= 1;
+    start = DateTime(d.year - 1, 9, ((d.year - 8) % 4 == 0) ? 12 : 11);
+  }
+  final days = d.difference(start).inDays;
+  return (
+    year: ethYear,
+    monthIndex: (days ~/ 30).clamp(0, 12),
+    day: (days % 30) + 1,
+  );
+}
+
+/// A Gregorian date as an Ethiopian date string, e.g. "ህዳር 16, 2019".
+String formatEthiopianDate(DateTime date) {
+  final p = ethiopianDateParts(date);
+  return '${ethiopianMonths13[p.monthIndex]} ${p.day}, ${p.year}';
+}
+
+/// Today's date in Ethiopian, e.g. "ህዳር 16, 2019".
+String formatEthiopianToday() => formatEthiopianDate(DateTime.now());
+
+/// The current Ethiopian year (2019 until Sep 10, 2027).
+int currentEthiopianYear() => ethiopianDateParts(DateTime.now()).year;
+
+/// A server timestamp ("2026-11-25 12:35:38", Gregorian) -> Ethiopian
+/// date string. Used for report dates, which must show the Ethiopian
+/// calendar — never the raw Gregorian date.
+String formatGregorianDateStringEthiopian(String value) {
+  final first = value.trim().split(RegExp(r'\s+')).first;
+  final parsed = DateTime.tryParse(first);
+  if (parsed == null) return first;
+  return formatEthiopianDate(parsed);
+}
+
 /// Gregorian date -> Ethiopian month index (0 = መስከረም … 12 = ጳጉሜ).
 /// Port of api/ethiopian_date.php gregorianToEthiopian: the Ethiopian
 /// new year falls on Sep 11 (Sep 12 when the Ethiopian year is a leap
