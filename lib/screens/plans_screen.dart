@@ -34,6 +34,9 @@ class PlansScreen extends StatefulWidget {
 class _PlansScreenState extends State<PlansScreen> {
   String selectedDeptId = 'all';
   String selectedStatusFilter = 'all'; // 'all', 'postponed', 'reported', 'completed', 'overdue'
+  /// Month view (2026-11-25): -1 = all months, else 0-12 index into
+  /// ethiopianMonths13. Defaults to the month we are in (ህዳር).
+  int selectedMonthIndex = -1;
   bool isTableView = true;
 
   /// M10፦ የመጨረሻው የአገልጋይ ዝርዝር-ማደስ ስህተት — "server አልተገኘም" ከ "እቅድ የለም"
@@ -53,6 +56,8 @@ class _PlansScreenState extends State<PlansScreen> {
     // C5: እቅዶች ሲጫኑ የአካባቢ ማሳሰቢያዎችን ማስያዝ (NotificationService init
     // በ main.dart ተደርጓል፤ ካልተዘጋጀ scheduleRemindersForPlans በዝምታ ይመለሳል)።
     NotificationService().scheduleRemindersForPlans(widget.plans);
+    // Month view: open on the month we are in.
+    selectedMonthIndex = currentEthiopianMonthIndex();
   }
 
   @override
@@ -65,11 +70,10 @@ class _PlansScreenState extends State<PlansScreen> {
     }
   }
 
-  List<PlanItem> get filteredPlans {
+  /// Plans after the department filter only (month chips count these).
+  List<PlanItem> get _deptFilteredPlans {
     final currentDept = AuthService.currentDepartment;
-
     return widget.plans.where((p) {
-      // 1. የክፍል ፍተሻ
       if (!AuthService.isSuperAdmin && currentDept != null) {
         if (!p.departmentName.contains(currentDept.shortName) && p.departmentId != currentDept.id) {
           return false;
@@ -80,7 +84,12 @@ class _PlansScreenState extends State<PlansScreen> {
           return false;
         }
       }
+      return true;
+    }).toList();
+  }
 
+  List<PlanItem> get filteredPlans {
+    final filtered = _deptFilteredPlans.where((p) {
       // 2. የሁኔታ/ሪፖርት ፍተሻ
       if (selectedStatusFilter == 'postponed') {
         return p.isPostponed;
@@ -95,7 +104,27 @@ class _PlansScreenState extends State<PlansScreen> {
       }
 
       return true;
+    }).where((p) {
+      // 3. የወር ፍተሻ (2026-11-25): plan seen by the month it is DUE in.
+      if (selectedMonthIndex < 0) return true;
+      final dueMonth = dueEthiopianMonthName(
+        dueDateEthiopian: p.dueDateEthiopian,
+        dueDate: p.dueDate,
+      );
+      return dueMonth == ethiopianMonths13[selectedMonthIndex];
     }).toList();
+
+    // Month view: earliest due date first, plans without a due date last.
+    filtered.sort((a, b) {
+      final da = a.dueDate;
+      final db = b.dueDate;
+      if (da == null && db == null) return a.id.compareTo(b.id);
+      if (da == null) return 1;
+      if (db == null) return -1;
+      final c = da.compareTo(db);
+      return c != 0 ? c : a.id.compareTo(b.id);
+    });
+    return filtered;
   }
 
   Future<void> _pickExcelFile() async {
@@ -1026,6 +1055,29 @@ class _PlansScreenState extends State<PlansScreen> {
               ),
             ),
 
+          // የወር ማጣሪያ ባር (2026-11-25): እቅድ በወር — እቅዱ በሚጠናቀቅበት ወር
+          // ይታያል። ነባሪው አሁን ያለንበት ወር ነው።
+          Container(
+            height: 42,
+            color: Colors.white,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              children: [
+                _buildMonthChip(-1, 'ሁሉም ወራት (${_deptFilteredPlans.length})'),
+                ...List.generate(ethiopianMonths13.length, (idx) {
+                  final count = _deptFilteredPlans.where((p) =>
+                      dueEthiopianMonthName(
+                        dueDateEthiopian: p.dueDateEthiopian,
+                        dueDate: p.dueDate,
+                      ) ==
+                      ethiopianMonths13[idx]).length;
+                  return _buildMonthChip(idx, '${ethiopianMonths13[idx]} ($count)');
+                }),
+              ],
+            ),
+          ),
+
           // የሁኔታ ማጣሪያ ባር (ሁሉም፣ የተላለፉ፣ ሪፖርት የቀረበባቸው፣ የተጠናቀቁ)
           Container(
             height: 42,
@@ -1078,7 +1130,9 @@ class _PlansScreenState extends State<PlansScreen> {
                           Text(
                             _serverError != null
                                 ? 'አገልጋዩ አልተገኘም፦ $_serverError'
-                                : 'በተመረጠው መስፈርት መሰረት ምንም እቅድ አልተገኘም',
+                                : selectedMonthIndex >= 0
+                                    ? 'በ${ethiopianMonths13[selectedMonthIndex]} ወር ምንም እቅድ አልተገኘም'
+                                    : 'በተመረጠው መስፈርት መሰረት ምንም እቅድ አልተገኘም',
                             textAlign: TextAlign.center,
                             style: const TextStyle(fontSize: 13),
                           ),
@@ -1125,6 +1179,36 @@ class _PlansScreenState extends State<PlansScreen> {
         onSelected: (val) {
           setState(() {
             selectedStatusFilter = val ? filterKey : 'all';
+          });
+        },
+      ),
+    );
+  }
+
+  /// Month chip (2026-11-25): -1 = all months, else an index into
+  /// ethiopianMonths13. Tapping a month shows only the plans due in
+  /// that month; tapping the selected month again shows all months.
+  Widget _buildMonthChip(int monthIndex, String label) {
+    final isSelected = selectedMonthIndex == monthIndex;
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: FilterChip(
+        avatar: Icon(Icons.calendar_month,
+            size: 14,
+            color: isSelected ? Colors.white : AppTheme.primaryMaroon),
+        label: Text(label),
+        selected: isSelected,
+        selectedColor: AppTheme.primaryMaroon,
+        checkmarkColor: Colors.white,
+        labelStyle: TextStyle(
+          color: isSelected ? Colors.white : Colors.black87,
+          fontSize: 11,
+          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+        ),
+        onSelected: (val) {
+          setState(() {
+            selectedMonthIndex =
+                val ? monthIndex : currentEthiopianMonthIndex();
           });
         },
       ),
