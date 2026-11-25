@@ -27,6 +27,7 @@ if ($action === 'login' && $method === 'POST') {
     // ተጠቃሚውን ከዳታቤዝ ብቻ መፈለግ (Auto-creation ሙሉ በሙሉ ተወግዷል!)
     $stmt = $pdo->prepare("
         SELECT u.id, u.username, u.full_name, u.role_title, u.password_hash, u.status, u.phone, u.email,
+               u.must_change_password,
                d.id AS department_id, d.name AS department_name, d.short_name AS department_short_name, d.is_super_admin
         FROM users u
         JOIN departments d ON u.department_id = d.id
@@ -78,7 +79,10 @@ if ($action === 'login' && $method === 'POST') {
             'department_id' => $user['department_id'],
             'department_name' => $user['department_name'],
             'department_short_name' => $user['department_short_name'],
-            'is_super_admin' => (bool)$user['is_super_admin']
+            'is_super_admin' => (bool)$user['is_super_admin'],
+            // Audit fix 2026-11-25: seed passwords must be changed on
+            // first login — the app shows the change screen when true.
+            'must_change_password' => (bool)($user['must_change_password'] ?? 0)
         ]
     ]);
 }
@@ -100,7 +104,7 @@ if ($action === 'me' && $method === 'GET') {
     $auth = requireAuth();
 
     $stmt = $pdo->prepare("
-        SELECT u.id, u.username, u.full_name, u.role_title, u.phone, u.email, u.last_login,
+        SELECT u.id, u.username, u.full_name, u.role_title, u.phone, u.email, u.last_login, u.must_change_password,
                d.id AS department_id, d.name AS department_name, d.short_name AS department_short_name, d.is_super_admin
         FROM users u
         JOIN departments d ON u.department_id = d.id
@@ -137,7 +141,8 @@ if ($action === 'change_password' && $method === 'POST') {
     }
 
     $newHash = password_hash($newPass, PASSWORD_BCRYPT, ['cost' => 12]);
-    $pdo->prepare("UPDATE users SET password_hash = ? WHERE id = ?")->execute([$newHash, $auth['user_id']]);
+    // Audit fix 2026-11-25: a successful change clears the first-login flag.
+    $pdo->prepare("UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?")->execute([$newHash, $auth['user_id']]);
 
     logAudit($pdo, 'password_change', 'users', (string)$auth['user_id'], $auth['user_id'], $auth['department_id']);
 

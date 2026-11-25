@@ -4,6 +4,7 @@
 // ============================================================
 
 require_once __DIR__ . '/config.php';
+require_once __DIR__ . '/ethiopian_date.php'; // due_date parsing (audit fix 2026-11-25)
 
 $auth = requireAuth(); // እያንዳንዱ ጥያቄ የግድ የተረጋገጠ ተጠቃሚ መሆን አለበት!
 $method = $_SERVER['REQUEST_METHOD'];
@@ -20,7 +21,8 @@ if ($method === 'GET') {
     // የተወሰነ እቅድ በ ID ማምጣት
     if ($id) {
         $stmt = $pdo->prepare("
-            SELECT p.*, d.name AS department_name, d.short_name AS department_short_name 
+            SELECT p.*, d.name AS department_name, d.short_name AS department_short_name,
+                   (SELECT r.status FROM reports r WHERE r.plan_id = p.id AND r.is_deleted = 0 ORDER BY r.created_at DESC, r.updated_at DESC LIMIT 1) AS latest_report_status
             FROM plans p 
             JOIN departments d ON p.department_id = d.id 
             WHERE p.id = ? AND (p.is_deleted = 0 OR p.is_deleted IS NULL) 
@@ -38,7 +40,8 @@ if ($method === 'GET') {
     }
 
     $sql = "
-        SELECT p.*, d.name AS department_name, d.short_name AS department_short_name 
+        SELECT p.*, d.name AS department_name, d.short_name AS department_short_name,
+               (SELECT r.status FROM reports r WHERE r.plan_id = p.id AND r.is_deleted = 0 ORDER BY r.created_at DESC, r.updated_at DESC LIMIT 1) AS latest_report_status
         FROM plans p 
         JOIN departments d ON p.department_id = d.id 
         WHERE (p.is_deleted = 0 OR p.is_deleted IS NULL)
@@ -104,12 +107,12 @@ if ($method === 'POST') {
                     id, department_id, sub_department, main_task, detail_task,
                     measurement, quantity, execution_time, target_date, budget,
                     remarks, months_json, progress_percent, status, priority,
-                    assigned_to, sync_id, version, is_deleted
+                    assigned_to, sync_id, version, is_deleted, due_date
                 ) VALUES (
                     ?, ?, ?, ?, ?,
                     ?, ?, ?, ?, ?,
                     ?, ?, ?, ?, ?,
-                    ?, ?, ?, 0
+                    ?, ?, ?, 0, ?
                 ) ON DUPLICATE KEY UPDATE
                     sub_department = VALUES(sub_department),
                     main_task = VALUES(main_task),
@@ -125,6 +128,7 @@ if ($method === 'POST') {
                     status = VALUES(status),
                     priority = VALUES(priority),
                     assigned_to = VALUES(assigned_to),
+                    due_date = VALUES(due_date),
                     version = version + 1
             ");
 
@@ -150,7 +154,8 @@ if ($method === 'POST') {
                     $item['priority'] ?? 'medium',
                     $item['assigned_to'] ?? null,
                     $item['sync_id'] ?? ('sync_' . uniqid()),
-                    (int)($item['version'] ?? 1)
+                    (int)($item['version'] ?? 1),
+                    parseEthiopianDate($item['execution_time'] ?? null)
                 ]);
                 $importedCount++;
             }
@@ -181,6 +186,15 @@ if ($method === 'POST') {
     $targetDate = $input['target_date'] ?? null;
     $budget = $input['budget'] ?? null;
     $remarks = $input['remarks'] ?? null;
+    // Audit fix 2026-11-25: postpone is now persisted server-side
+    // (before, only the new date survived — the fact that the plan
+    // was postponed, its original date and the reason were lost).
+    $isPostponed = !empty($input['is_postponed']) ? 1 : 0;
+    $postponedDate = $input['postponed_date'] ?? null;
+    $postponeReason = $input['postpone_reason'] ?? null;
+    $originalExecutionTime = $input['original_execution_time'] ?? null;
+    // Real due date parsed from the Ethiopian execution_time text.
+    $dueDate = parseEthiopianDate($executionTime);
     $monthsJson = isset($input['months']) ? json_encode($input['months'], JSON_UNESCAPED_UNICODE) : ($input['months_json'] ?? null);
     $progress = max(0, min(100, (int)($input['progress_percent'] ?? 0)));
     $status = $input['status'] ?? ($progress >= 100 ? 'completed' : 'in_progress');
@@ -193,7 +207,7 @@ if ($method === 'POST') {
     }
 
     // ያለውን እቅድ ማረጋገጥ
-    $checkStmt = $pdo->prepare("SELECT department_id, version FROM plans WHERE id = ?");
+    $checkStmt = $pdo->prepare("SELECT department_id, version, execution_time, original_execution_time, is_postponed FROM plans WHERE id = ?");
     $checkStmt->execute([$id]);
     $existing = $checkStmt->fetch();
 
@@ -207,12 +221,30 @@ if ($method === 'POST') {
             jsonError('የስሪት ግጭት ተፈጥሯል (Version Conflict)! እቅዱ በሌላ ተጠቃሚ ቀድሞ ስለተሻሻለ እባክዎ ገጹን አድሰው እንደገና ይሞክሩ።', 409);
         }
 
+        // Postpone guard: keep the ORIGINAL date when a plan is
+        // postponed for the first time and the caller did not send it.
+        $postponedAt = null;
+        if ($isPostponed) {
+            if (empty($originalExecutionTime) && !empty($existing['execution_time']) && $existing['execution_time'] !== $executionTime) {
+                $originalExecutionTime = $existing['execution_time'];
+            }
+            if (empty($existing['is_postponed'])) {
+                $postponedAt = date('Y-m-d H:i:s');
+            }
+        } else {
+            $postponedDate = null;
+            $postponeReason = null;
+            $originalExecutionTime = null;
+        }
+
         $updateStmt = $pdo->prepare("
             UPDATE plans SET
                 department_id = ?, sub_department = ?, main_task = ?, detail_task = ?,
                 measurement = ?, quantity = ?, execution_time = ?, target_date = ?,
                 budget = ?, remarks = ?, months_json = ?, progress_percent = ?,
-                status = ?, priority = ?, assigned_to = ?, sync_id = ?, version = version + 1
+                status = ?, priority = ?, assigned_to = ?, sync_id = ?, version = version + 1,
+                original_execution_time = ?, postponed_date = ?, postpone_reason = ?,
+                is_postponed = ?, postponed_at = COALESCE(?, postponed_at), due_date = ?
             WHERE id = ?
         ");
         $updateStmt->execute([
@@ -220,6 +252,8 @@ if ($method === 'POST') {
             $measurement, $quantity, $executionTime, $targetDate,
             $budget, $remarks, $monthsJson, $progress,
             $status, $priority, $assignedTo, $syncId,
+            $originalExecutionTime, $postponedDate, $postponeReason,
+            $isPostponed, $postponedAt, $dueDate,
             $id
         ]);
         $msg = 'ዕቅዱ በተሳካ ሁኔታ ተሻሽሏል';
@@ -230,19 +264,22 @@ if ($method === 'POST') {
                 id, department_id, sub_department, main_task, detail_task,
                 measurement, quantity, execution_time, target_date, budget,
                 remarks, months_json, progress_percent, status, priority,
-                assigned_to, sync_id, is_deleted
+                assigned_to, sync_id, is_deleted,
+                original_execution_time, postponed_date, postpone_reason, is_postponed, due_date
             ) VALUES (
                 ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?,
-                ?, ?, 0
+                ?, ?, 0,
+                ?, ?, ?, ?, ?
             )
         ");
         $insertStmt->execute([
             $id, $deptId, $subDept, $mainTask, $detailTask,
             $measurement, $quantity, $executionTime, $targetDate, $budget,
             $remarks, $monthsJson, $progress, $status, $priority,
-            $assignedTo, $syncId
+            $assignedTo, $syncId,
+            $originalExecutionTime, $postponedDate, $postponeReason, $isPostponed, $dueDate
         ]);
         $msg = 'አዲስ ዕቅድ በተሳካ ሁኔታ ተመዝግቧል';
         logAudit($pdo, 'create_plan', 'plans', $id, $auth['user_id'], $deptId, ['main_task' => $mainTask]);
