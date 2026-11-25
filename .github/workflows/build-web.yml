@@ -1,0 +1,47 @@
+# Build the Flutter web version and deploy it to GitHub Pages, so the app
+# also runs on iPhone (Safari -> Add to Home Screen) and desktop browsers.
+# Same API as the Android app (API_BASE_URL dart-define), same code.
+name: Build and deploy website (Flutter web)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'lib/**'
+      - 'web/**'
+      - 'pubspec.yaml'
+      - 'pubspec.lock'
+      - 'assets/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Install dependencies
+        run: flutter pub get
+      - name: Build web
+        run: flutter build web --release --base-href /plan-atsede-teguhan/ --dart-define API_BASE_URL=https://plan-atsede-php-api.onrender.com
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
