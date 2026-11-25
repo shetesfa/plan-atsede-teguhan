@@ -5,6 +5,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import '../models/official_letter.dart';
 import '../models/proposal.dart';
+import '../utils/ethiopian_date_display.dart';
 
 class PdfGeneratorService {
   static Future<pw.Font> _loadNyalaFont() async {
@@ -619,13 +620,13 @@ class PdfGeneratorService {
                         ),
                         pw.SizedBox(height: 2),
                         pw.Text(
-                          'የ2019 ዓ.ም የክፍሎች እቅድ አፈፃፀም ግምገማ እና የቁጥጥር ሪፖርት ($periodName)',
+                          'የ${currentEthiopianYear()} ዓ.ም የክፍሎች እቅድ አፈፃፀም ግምገማ እና የቁጥጥር ሪፖርት ($periodName)',
                           style: const pw.TextStyle(fontSize: 11, color: PdfColors.grey800),
                         ),
                       ],
                     ),
                   ),
-                  pw.Text('ቀን፡ ዛሬ', style: const pw.TextStyle(fontSize: 10)),
+                  pw.Text('ቀን፡ ${formatEthiopianToday()}', style: const pw.TextStyle(fontSize: 10)),
                 ],
               ),
               pw.Divider(thickness: 1.5, color: PdfColor.fromHex('#C5A059')),

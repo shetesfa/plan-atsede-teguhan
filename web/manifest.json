@@ -1,35 +1,35 @@
 {
-    "name": "atsede_teguhan_app",
-    "short_name": "atsede_teguhan_app",
+    "name": "አጸደ ትጉሃን ሰንበት ት/ቤት",
+    "short_name": "አጸደ ትጉሃን",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
-    "orientation": "portrait-primary",
+    "background_color": "#7A1321",
+    "theme_color": "#7A1321",
+    "description": "የአጸደ ትጉሃን ሰንበት ትምህርት ቤት እቅድ አስተዳደር እና መገናኛ ስርዓት — እቅዶች፣ ሪፖርቶች፣ ቀን መቁጠሪያ እና ይፋዊ ሰነዶች።",
+    "orientation": "any",
     "prefer_related_applications": false,
     "icons": [
         {
+            "sizes": "192x192",
             "src": "icons/Icon-192.png",
-            "sizes": "192x192",
             "type": "image/png"
         },
         {
+            "sizes": "512x512",
             "src": "icons/Icon-512.png",
-            "sizes": "512x512",
             "type": "image/png"
         },
         {
-            "src": "icons/Icon-maskable-192.png",
+            "purpose": "maskable",
             "sizes": "192x192",
-            "type": "image/png",
-            "purpose": "maskable"
+            "src": "icons/Icon-maskable-192.png",
+            "type": "image/png"
         },
         {
-            "src": "icons/Icon-maskable-512.png",
+            "purpose": "maskable",
             "sizes": "512x512",
-            "type": "image/png",
-            "purpose": "maskable"
+            "src": "icons/Icon-maskable-512.png",
+            "type": "image/png"
         }
     ]
 }

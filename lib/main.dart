@@ -58,6 +58,34 @@ class AtsedeTeguhanApp extends StatelessWidget {
       title: 'ዓጸደ ትጉሃን ሰንበት ትምህርት ቤት',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
+      // Adaptive shell: on wide screens (desktop web, tablets, large
+      // phones in landscape) the phone-designed screens stay in a
+      // centered column instead of stretching edge to edge; on normal
+      // phones nothing changes. The MediaQuery size is overridden too,
+      // so screens that size themselves from it (chat bubbles, login)
+      // measure the column they are actually painted in.
+      builder: (context, child) {
+        if (child == null) return const SizedBox.shrink();
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            if (constraints.maxWidth <= 1000) return child;
+            final media = MediaQuery.of(context);
+            return Container(
+              color: AppTheme.darkMaroon,
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1000),
+                child: MediaQuery(
+                  data: media.copyWith(
+                    size: Size(1000, media.size.height),
+                  ),
+                  child: child,
+                ),
+              ),
+            );
+          },
+        );
+      },
       home: _InitErrorBanner(
         errors: initErrors,
         child: const MainNavigationScreen(),
