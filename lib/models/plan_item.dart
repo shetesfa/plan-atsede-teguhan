@@ -20,8 +20,14 @@ class PlanItem {
   DateTime? updatedAt;
 
   // የእቅድ ማስተላለፍ (Postpone / Reschedule) መረጃዎች
+  // Audit fix 2026-11-25: these are now stored server-side too
+  // (api/plans.php + migration 06) — before, they lived only in
+  // the app's memory and were lost on restart.
   String? postponedDate; // የተላለፈበት አዲስ ቀን
   String? postponeReason; // የተላለፈበት ምክንያት
+  String? originalExecutionTime; // ከመተላለፉ በፊት የነበረው ቀን
+  DateTime? dueDate; // ከ execution_time የተተረጎመ እውነተኛ ቀን (Gregorian)
+  String? latestReportStatus; // የቅርብ ጊዜ ሪፖርት ሁኔታ (server)
 
   // የተሟላ የእቅድ ክንውን ሪፖርት (Detailed Execution & Shortfall Report)
   String? reportDetails; // የተከናወኑ ስራዎች ዝርዝር
@@ -48,6 +54,9 @@ class PlanItem {
     this.updatedAt,
     this.postponedDate,
     this.postponeReason,
+    this.originalExecutionTime,
+    this.dueDate,
+    this.latestReportStatus,
     this.reportDetails,
     this.notDoneDetails,
     this.reportSubmittedAt,
@@ -61,13 +70,30 @@ class PlanItem {
   String? get doneDetails => reportDetails;
 
   bool get isPostponed => postponedDate != null && postponedDate!.trim().isNotEmpty;
+  // Audit fix 2026-11-25: a plan is overdue when its real due date
+  // has passed, it is not completed, and no report has been submitted
+  // (a submitted / under-review / approved report clears it).
+  bool get isOverdue {
+    if (isCompleted || dueDate == null) return false;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final due = DateTime(dueDate!.year, dueDate!.month, dueDate!.day);
+    if (!due.isBefore(today)) return false;
+    return latestReportStatus != 'submitted' &&
+        latestReportStatus != 'under_review' &&
+        latestReportStatus != 'approved';
+  }
   bool get hasReport =>
       (reportDetails != null && reportDetails!.trim().isNotEmpty) ||
       (notDoneDetails != null && notDoneDetails!.trim().isNotEmpty) ||
       reportSubmittedAt != null;
 
-  String get effectiveExecutionTime =>
-      isPostponed ? '$executionTime (👉 የተላለፈበት፦ $postponedDate)' : executionTime;
+  String get effectiveExecutionTime {
+    if (isPostponed && originalExecutionTime != null && originalExecutionTime!.trim().isNotEmpty) {
+      return '$originalExecutionTime ➜ $postponedDate';
+    }
+    return isPostponed ? '$executionTime (👉 የተላለፈበት፦ $postponedDate)' : executionTime;
+  }
 
   PlanItem copyWith({
     String? id,
@@ -88,6 +114,9 @@ class PlanItem {
     DateTime? updatedAt,
     String? postponedDate,
     String? postponeReason,
+    String? originalExecutionTime,
+    DateTime? dueDate,
+    String? latestReportStatus,
     String? reportDetails,
     String? notDoneDetails,
     DateTime? reportSubmittedAt,
@@ -112,6 +141,9 @@ class PlanItem {
       updatedAt: updatedAt ?? this.updatedAt,
       postponedDate: postponedDate ?? this.postponedDate,
       postponeReason: postponeReason ?? this.postponeReason,
+      originalExecutionTime: originalExecutionTime ?? this.originalExecutionTime,
+      dueDate: dueDate ?? this.dueDate,
+      latestReportStatus: latestReportStatus ?? this.latestReportStatus,
       reportDetails: reportDetails ?? this.reportDetails,
       notDoneDetails: notDoneDetails ?? this.notDoneDetails,
       reportSubmittedAt: reportSubmittedAt ?? this.reportSubmittedAt,
@@ -139,6 +171,9 @@ class PlanItem {
       'updatedAt': updatedAt?.toIso8601String(),
       'postponedDate': postponedDate,
       'postponeReason': postponeReason,
+      'originalExecutionTime': originalExecutionTime,
+      'dueDate': dueDate?.toIso8601String(),
+      'latestReportStatus': latestReportStatus,
       'reportDetails': reportDetails,
       'notDoneDetails': notDoneDetails,
       'reportSubmittedAt': reportSubmittedAt?.toIso8601String(),
@@ -175,6 +210,9 @@ class PlanItem {
           : null,
       postponedDate: json['postponedDate'],
       postponeReason: json['postponeReason'],
+      originalExecutionTime: json['originalExecutionTime'],
+      dueDate: json['dueDate'] != null ? DateTime.tryParse(json['dueDate'].toString()) : null,
+      latestReportStatus: json['latestReportStatus']?.toString(),
       reportDetails: json['reportDetails'],
       notDoneDetails: json['notDoneDetails'],
       reportSubmittedAt: json['reportSubmittedAt'] != null
@@ -215,6 +253,13 @@ class PlanItem {
       months: parsedMonths,
       progressPercent: int.tryParse(json['progress_percent']?.toString() ?? '') ?? 0,
       reason: json['remarks']?.toString() ?? '',
+      // Audit fix 2026-11-25: postpone state + real due date now come
+      // from the server (they used to be lost on every restart).
+      postponedDate: json['postponed_date']?.toString(),
+      postponeReason: json['postpone_reason']?.toString(),
+      originalExecutionTime: json['original_execution_time']?.toString(),
+      dueDate: json['due_date'] != null ? DateTime.tryParse(json['due_date'].toString()) : null,
+      latestReportStatus: json['latest_report_status']?.toString(),
     );
   }
 }

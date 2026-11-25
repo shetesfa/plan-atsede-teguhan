@@ -6,6 +6,7 @@ import '../services/auth_service.dart';
 import '../widgets/telegram_connect_dialog.dart';
 import '../theme/app_theme.dart';
 import 'document_editor_screen.dart';
+import 'change_password_screen.dart';
 
 class DashboardScreen extends StatelessWidget {
   final List<PlanItem> plans;
@@ -251,12 +252,10 @@ class DashboardScreen extends StatelessWidget {
 
     final postponedPlans = visiblePlans.where((p) => p.isPostponed).toList();
     final reportedPlans = visiblePlans.where((p) => p.hasReport || p.progressPercent > 0).toList();
-    final overduePlans = visiblePlans.where((p) {
-      if (p.isCompleted || p.isPostponed) return false;
-      final mes = p.months['መስ'] ?? '';
-      final tiq = p.months['ጥቅ'] ?? '';
-      return (mes.isNotEmpty && mes != '-') || (tiq.isNotEmpty && tiq != '-');
-    }).toList();
+    // Audit fix 2026-11-25: overdue now means the plan's real due date
+    // has passed with no report (PlanItem.isOverdue, server due_date).
+    // Before, this counted every plan scheduled in መስከረም/ጥቅምት.
+    final overduePlans = visiblePlans.where((p) => p.isOverdue).toList();
 
     final totalNotifications = overduePlans.length + postponedPlans.length;
     final totalUnplanned = unplannedActivities.length;
@@ -304,6 +303,16 @@ class DashboardScreen extends StatelessWidget {
             icon: const Icon(Icons.refresh),
             onPressed: onRefresh,
             tooltip: 'አድስ',
+          ),
+          // Audit fix 2026-11-25: የይለፍ ቃል መቀየሪያ (ከዚህ በፊት በአፕ ውስጥ አልነበረም)።
+          IconButton(
+            icon: const Icon(Icons.lock_reset, color: Colors.white),
+            tooltip: 'የይለፍ ቃል ቀይር',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const ChangePasswordScreen()),
+              );
+            },
           ),
           IconButton(
             icon: const Icon(Icons.logout),

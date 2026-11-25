@@ -88,7 +88,9 @@ class _PlansScreenState extends State<PlansScreen> {
       } else if (selectedStatusFilter == 'completed') {
         return p.isCompleted;
       } else if (selectedStatusFilter == 'overdue') {
-        return !p.isCompleted;
+        // Audit fix 2026-11-25: overdue = real due date passed with no
+        // report (was: every plan that is not completed).
+        return p.isOverdue;
       }
 
       return true;
@@ -891,11 +893,20 @@ class _PlansScreenState extends State<PlansScreen> {
                                   'budget': item.budget,
                                   'remarks': postponeReason.isNotEmpty ? postponeReason : item.remarks,
                                   'progress_percent': item.progressPercent,
+                                  // Audit fix 2026-11-25: postpone is now
+                                  // persisted server-side (migration 06).
+                                  'original_execution_time': item.executionTime,
+                                  'postponed_date': newDate,
+                                  'postpone_reason': postponeReason,
+                                  'is_postponed': true,
                                 };
 
+                                final oldDate = item.executionTime;
                                 final result = await ApiService().savePlan(planPayload);
                                 final saved = result['success'] == true;
 
+                                item.originalExecutionTime = oldDate;
+                                item.executionTime = newDate;
                                 item.postponedDate = newDate;
                                 item.postponeReason = postponeReason;
                                 item.updatedAt = DateTime.now();
@@ -908,7 +919,7 @@ class _PlansScreenState extends State<PlansScreen> {
                                     deptName: item.departmentName,
                                     senderTitle: senderTitle,
                                     taskTitle: item.detailTask.isNotEmpty ? item.detailTask : item.mainTask,
-                                    originalDate: item.executionTime,
+                                    originalDate: oldDate,
                                     newDate: newDate,
                                     reason: postponeReason.isNotEmpty ? postponeReason : 'ምክንያት አልተገለጸም',
                                   );
