@@ -293,6 +293,15 @@ class NotificationService extends ChangeNotifier {
     'ጳጉሜ': 13, 'ጳጉ': 13,
   };
 
+  // RULE (2026-11-25, Tesfa): a plan's real date is its LAST
+  // window, not its first. "መስ (10-30), የካ (6-28)" runs in
+  // Meskerem AND in Yekatit, so it is due at the END of Yekatit
+  // (28), not at the start of Meskerem (10). Taking the first
+  // date flagged such plans as "late" months too early.
+  // "ዓመቱን ሙሉ" (the whole year) is due at the end of the year
+  // (Pagume 5, 6 in a leap year). A month with no day ("ሁሌ",
+  // "የወሩ መጨረሻ", month name alone) is due at the end of that
+  // month (day 30, Pagume 5/6).
   static DateTime? parseEthiopianDate(String? raw) {
     if (raw == null) return null;
     final text = raw.trim();
@@ -311,31 +320,6 @@ class NotificationService extends ChangeNotifier {
       return null;
     }
 
-    // Month name + day, in either order. Search for the day AFTER the
-    // month name first (so a leading year like "2019 ... ጥር 10" is not
-    // mistaken for the day), then before it.
-    String? monthKey;
-    int? month;
-    for (final entry in _ethiopianMonths.entries) {
-      if (text.contains(entry.key)) {
-        monthKey = entry.key;
-        month = entry.value;
-        break;
-      }
-    }
-    if (month == null || monthKey == null) return null;
-    final monthIndex = text.indexOf(monthKey);
-    final afterMonth = text.substring(monthIndex + monthKey.length);
-    final beforeMonth = text.substring(0, monthIndex);
-    // Ignore 4-digit years when hunting for the day.
-    final dayText = afterMonth.replaceAll(RegExp(r'20\d{2}'), ' ');
-    var dayMatch = RegExp(r'(\d{1,2})').firstMatch(dayText);
-    dayMatch ??= RegExp(r'(\d{1,2})')
-        .firstMatch(beforeMonth.replaceAll(RegExp(r'20\d{2}'), ' '));
-    if (dayMatch == null) return null; // Month alone: no usable day.
-    final day = int.tryParse(dayMatch.group(1)!);
-    if (day == null || day < 1 || day > 30) return null;
-
     // Year: explicit 4-digit Ethiopian year in the text, else the
     // current Ethiopian year — derived from the Gregorian year, not
     // hardcoded (Greg year − 8 before 11 Sep, − 7 from 11 Sep).
@@ -343,6 +327,59 @@ class NotificationService extends ChangeNotifier {
     final ethYear = yearMatch != null
         ? int.tryParse(yearMatch.group(1)!) ?? _currentEthiopianYear()
         : _currentEthiopianYear();
+
+    // "ዓመቱን ሙሉ" (the whole year): due at the end of the year.
+    if (text.contains('ዓመቱን ሙሉ')) {
+      final lastDay = ethYear % 4 == 0 ? 6 : 5;
+      return _ethiopianToGregorian(ethYear, 13, lastDay);
+    }
+
+    // Every month-name occurrence; the LAST one wins. Longest name
+    // wins at the same position, so "መስ" never steals "መስከረም".
+    final occ = <(int, int, int)>[]; // (charPos, nameLen, monthNum)
+    for (final entry in _ethiopianMonths.entries) {
+      var from = 0;
+      while (true) {
+        final pos = text.indexOf(entry.key, from);
+        if (pos < 0) break;
+        occ.add((pos, entry.key.length, entry.value));
+        from = pos + 1;
+      }
+    }
+    if (occ.isEmpty) return null;
+    occ.sort((a, b) {
+      if (a.$1 != b.$1) return a.$1.compareTo(b.$1);
+      return b.$2.compareTo(a.$2); // longest first at same position
+    });
+    final filtered = <(int, int, int)>[];
+    var lastPos = -1;
+    var lastLen = 0;
+    for (final o in occ) {
+      if (o.$1 == lastPos && o.$2 < lastLen) continue;
+      filtered.add(o);
+      lastPos = o.$1;
+      lastLen = o.$2;
+    }
+    final last = filtered.last;
+    final month = last.$3;
+
+    // Days after the last month name: the LAST number wins
+    // (ranges "10-30" -> 30, lists "4፣11፣18" -> 18).
+    // 4-digit years are ignored. No number means the end of
+    // that month ("ሁሌ", "የወሩ መጨረሻ", month name alone).
+    final segment = text
+        .substring(last.$1 + last.$2)
+        .replaceAll(RegExp(r'20\d{2}'), ' ');
+    final nums = RegExp(r'(\d{1,2})')
+        .allMatches(segment)
+        .map((m) => int.tryParse(m.group(1)!))
+        .whereType<int>()
+        .toList();
+    var day = nums.isEmpty ? null : nums.last;
+    day ??= month == 13 ? (ethYear % 4 == 0 ? 6 : 5) : 30;
+    if (day < 1) return null;
+    if (month == 13 && day > 6) day = 6;
+    if (month < 13 && day > 30) day = 30;
     return _ethiopianToGregorian(ethYear, month, day);
   }
 
