@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services/auth_service.dart';
 import '../services/telegram_service.dart';
 import '../theme/app_theme.dart';
 
@@ -24,13 +25,22 @@ class _TelegramConnectDialogState extends State<TelegramConnectDialog> {
   List<Map<String, dynamic>> _recentChats = [];
   String? _statusMessage;
 
+  // 2026-11-26 (M3): only the office (super admin) and the education
+  // department may change the bot token. For everyone else the token
+  // field stays empty and disabled, so the token is never shown.
+  bool get _canChangeToken =>
+      AuthService.isSuperAdmin ||
+      AuthService.currentDepartment?.id == 'education';
+
   @override
   void initState() {
     super.initState();
     if (TelegramService.savedChatId != null) {
       _idController.text = TelegramService.savedChatId!;
     }
-    _tokenController.text = TelegramService.botToken;
+    if (_canChangeToken) {
+      _tokenController.text = TelegramService.botToken;
+    }
     _autoDiscover();
   }
 
@@ -65,7 +75,7 @@ class _TelegramConnectDialogState extends State<TelegramConnectDialog> {
     }
 
     setState(() => _isLoading = true);
-    if (token.isNotEmpty) {
+    if (token.isNotEmpty && _canChangeToken) {
       await TelegramService.saveBotToken(token);
     }
     await TelegramService.saveChatId(text);
@@ -227,10 +237,14 @@ class _TelegramConnectDialogState extends State<TelegramConnectDialog> {
                 controller: _tokenController,
                 keyboardType: TextInputType.text,
                 obscureText: true,
-                decoration: const InputDecoration(
-                  hintText: 'አዲስ የ Bot Token ከ @BotFather...',
-                  border: OutlineInputBorder(),
-                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                enabled: _canChangeToken,
+                decoration: InputDecoration(
+                  hintText: _canChangeToken
+                      ? 'አዲስ የ Bot Token ከ @BotFather...'
+                      : 'የ Bot Token መቀየር ለፅ/ቤት እና ለትምህርት ክፍል ብቻ ነው',
+                  border: const OutlineInputBorder(),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 ),
               ),
 

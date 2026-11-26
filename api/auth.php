@@ -27,7 +27,7 @@ if ($action === 'login' && $method === 'POST') {
     // ተጠቃሚውን ከዳታቤዝ ብቻ መፈለግ (Auto-creation ሙሉ በሙሉ ተወግዷል!)
     $stmt = $pdo->prepare("
         SELECT u.id, u.username, u.full_name, u.role_title, u.role, u.password_hash, u.status, u.phone, u.email,
-               u.must_change_password,
+               u.must_change_password, u.token_version,
                d.id AS department_id, d.name AS department_name, d.short_name AS department_short_name, d.is_super_admin, d.can_view_all
         FROM users u
         JOIN departments d ON u.department_id = d.id
@@ -63,7 +63,10 @@ if ($action === 'login' && $method === 'POST') {
         // 2026-11-26: control department sees all (view-only).
         'can_view_all' => (bool)($user['can_view_all'] ?? false),
         'role_title' => $user['role_title'],
-        'role' => $user['role'] ?? 'member'
+        'role' => $user['role'] ?? 'member',
+        // 2026-11-26: token version — bumped on every password change;
+        // verifyToken() rejects tokens with a stale version.
+        'token_version' => (int)($user['token_version'] ?? 0)
     ];
     $token = createToken($tokenPayload, 86400 * 7); // ለ 7 ቀናት የሚሰራ
 
@@ -149,7 +152,9 @@ if ($action === 'change_password' && $method === 'POST') {
 
     $newHash = password_hash($newPass, PASSWORD_BCRYPT, ['cost' => 12]);
     // Audit fix 2026-11-25: a successful change clears the first-login flag.
-    $pdo->prepare("UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?")->execute([$newHash, $auth['user_id']]);
+    // 2026-11-26: bump token_version so every token issued before this
+    // password change stops working immediately.
+    $pdo->prepare("UPDATE users SET password_hash = ?, must_change_password = 0, token_version = token_version + 1 WHERE id = ?")->execute([$newHash, $auth['user_id']]);
 
     logAudit($pdo, 'password_change', 'users', (string)$auth['user_id'], $auth['user_id'], $auth['department_id']);
 

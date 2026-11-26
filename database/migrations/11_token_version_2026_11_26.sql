@@ -1,0 +1,12 @@
+-- Migration 11 (2026-11-26): revoke all tokens when a password changes.
+--
+-- token_version: a counter on each user, included in every token issued
+-- at login. verifyToken() rejects a token whose version no longer matches
+-- the stored value, so changing a password (by the user themselves in
+-- auth.php change_password, or by the office in users.php reset_password)
+-- instantly invalidates every token issued before the change — including
+-- tokens on a lost/stolen phone. Without this, a changed password left
+-- all old 7-day tokens working.
+--
+-- TiDB-safe: one ADD COLUMN per statement; idempotent (IF NOT EXISTS).
+ALTER TABLE `users` ADD COLUMN IF NOT EXISTS `token_version` INT NOT NULL DEFAULT 0;

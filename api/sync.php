@@ -210,6 +210,17 @@ if ($method === 'POST') {
                             }
                         }
 
+                        // 2026-11-26 (H1): status allowlist — a non-admin may only
+                        // set draft/submitted here, exactly like reports.php.
+                        // approved/under_review/rejected/revision_requested can
+                        // never be set through sync (review is office-only,
+                        // via reports.php action=review). Anything else keeps
+                        // the existing status (COALESCE below).
+                        $syncStatus = $payload['status'] ?? null;
+                        if (!$auth['is_super_admin'] && !in_array($syncStatus, ['draft', 'submitted'], true)) {
+                            $syncStatus = null;
+                        }
+
                         $rStmt = $pdo->prepare("
                             UPDATE reports SET
                                 title = ?, activities_completed = ?, progress_percent = ?, challenges = ?,
@@ -222,7 +233,7 @@ if ($method === 'POST') {
                             max(0, min(100, (int)($payload['progress_percent'] ?? 0))),
                             $payload['challenges'] ?? null,
                             (float)($payload['budget_spent'] ?? 0),
-                            $payload['status'] ?? null,
+                            $syncStatus,
                             $syncId,
                             $reportId
                         ]);
