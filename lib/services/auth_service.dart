@@ -36,6 +36,14 @@ class AuthService {
   // NEVER all-department access like the office (education is one).
   static bool get isDeptAdmin => currentUserProfile?['is_dept_admin'] == true;
 
+  // 2026-11-26: control department — sees ALL departments' plans and
+  // reports (view-only, like the office for viewing). It does NOT grant
+  // plan delete, report review, or user management. The server sends the
+  // flag as bool (login) or int 1/0 (profile refresh) — accept both.
+  static bool get canViewAll =>
+      currentUserProfile?['can_view_all'] == true ||
+      currentUserProfile?['can_view_all'] == 1;
+
   /// A plan can be deleted/managed by the office (super admin) or by a
   /// department admin of that plan's OWN department only.
   static bool canManagePlan(String departmentId) =>

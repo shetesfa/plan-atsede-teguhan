@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -367,6 +368,27 @@ class ApiService {
     } catch (e) {
       return {'success': false, 'message': 'የአውታረ-መረብ ስህተት፦ $e'};
     }
+  }
+
+  // 6b. የሪፖርት አባሪ ማውረድ (Download Report Attachment — 2026-11-26)
+  // files.php is auth-guarded (Bearer token) and serves the file by
+  // attachment id; the server enforces own-department / super-admin /
+  // can_view_all access. Returns the raw bytes, or null on failure.
+  Future<Uint8List?> downloadAttachment(String attachmentId) async {
+    final uri = Uri.parse('$baseUrl/files.php').replace(queryParameters: {
+      'id': attachmentId,
+      'action': 'download',
+    });
+    try {
+      final res = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 30));
+      if (res.statusCode == 200) {
+        return res.bodyBytes;
+      }
+      debugPrint('downloadAttachment failed: HTTP ${res.statusCode}');
+    } catch (e) {
+      debugPrint('downloadAttachment error: $e');
+    }
+    return null;
   }
 
   // 7. የፅ/ቤት ግምገማ (Review Report)

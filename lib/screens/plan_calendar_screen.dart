@@ -43,11 +43,13 @@ class _PlanCalendarScreenState extends State<PlanCalendarScreen> {
 
   List<PlanItem> get _filteredPlans {
     final currentDept = AuthService.currentDepartment;
-    final isSuper = AuthService.isSuperAdmin;
+    // 2026-11-26: the control department (can_view_all) sees all
+    // departments — view-only, like the office.
+    final canViewAll = AuthService.isSuperAdmin || AuthService.canViewAll;
 
     return widget.plans.where((p) {
       // የክፍል ፍተሻ
-      if (!isSuper) {
+      if (!canViewAll) {
         if (!p.departmentName.contains(currentDept?.shortName ?? '') && p.departmentId != currentDept?.id) {
           return false;
         }
@@ -669,6 +671,10 @@ class _PlanCalendarScreenState extends State<PlanCalendarScreen> {
   @override
   Widget build(BuildContext context) {
     final isSuper = AuthService.isSuperAdmin;
+    // 2026-11-26: the control department (can_view_all) gets the
+    // department selector too (view-only). The overdue banner below
+    // stays super-admin only — it sends office alerts to Telegram.
+    final canViewAllDepts = isSuper || AuthService.canViewAll;
     final overdueCount = _allOverduePlans.length;
     final filtered = _filteredPlans;
 
@@ -691,8 +697,8 @@ class _PlanCalendarScreenState extends State<PlanCalendarScreen> {
       ),
       body: Column(
         children: [
-          // ፅ/ቤት ከሆነ የክፍሎች መራጭ
-          if (isSuper)
+          // ፅ/ቤት ወይም ቁጥጥር (can_view_all) ከሆነ የክፍሎች መራጭ
+          if (canViewAllDepts)
             Container(
               height: 44,
               color: Colors.white,

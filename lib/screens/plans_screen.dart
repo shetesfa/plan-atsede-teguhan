@@ -1,7 +1,7 @@
+import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:image_picker/image_picker.dart';
 import '../models/department.dart';
 import '../models/plan_item.dart';
 import '../services/api_service.dart';
@@ -48,7 +48,9 @@ class _PlansScreenState extends State<PlansScreen> {
   void initState() {
     super.initState();
     final currentDept = AuthService.currentDepartment;
-    if (!AuthService.isSuperAdmin && currentDept != null) {
+    // 2026-11-26: the control department (can_view_all) sees all
+    // departments — do not force its own department here.
+    if (!AuthService.isSuperAdmin && !AuthService.canViewAll && currentDept != null) {
       selectedDeptId = currentDept.id;
     } else if (widget.initialDepartmentId != null) {
       selectedDeptId = widget.initialDepartmentId!;
@@ -74,7 +76,9 @@ class _PlansScreenState extends State<PlansScreen> {
   List<PlanItem> get _deptFilteredPlans {
     final currentDept = AuthService.currentDepartment;
     return widget.plans.where((p) {
-      if (!AuthService.isSuperAdmin && currentDept != null) {
+      // 2026-11-26: the control department (can_view_all) sees all
+      // departments — view-only, like the office.
+      if (!AuthService.isSuperAdmin && !AuthService.canViewAll && currentDept != null) {
         if (!p.departmentName.contains(currentDept.shortName) && p.departmentId != currentDept.id) {
           return false;
         }
@@ -406,10 +410,10 @@ class _PlansScreenState extends State<PlansScreen> {
     int currentPercent = item.progressPercent;
     final doneController = TextEditingController(text: item.reportDetails ?? '');
     final notDoneController = TextEditingController(text: item.notDoneDetails ?? item.reason);
-    String? pickedImagePath = item.evidencePath;
-    // በዚህ ክፍለ-ጊዜ የተመረጠ ፎቶ (XFile.readAsBytes() በሁሉም platform ይሰራል —
-    // dart:io File መጠቀም በ web ላይ አይሰራም)።
-    Uint8List? pickedImageBytes;
+    // 2026-11-26: many attachments — images + documents (pdf/doc/docx/
+    // xls/xlsx). Bytes are kept in memory (XFile.readAsBytes() works on
+    // all platforms — dart:io File does not work on web).
+    final List<_PickedAttachment> pickedAttachments = [];
     bool isSubmitting = false;
 
     showModalBottomSheet(
@@ -553,41 +557,93 @@ class _PlansScreenState extends State<PlansScreen> {
                       const SizedBox(height: 14),
                     ],
 
-                    // የፎቶ ማስረጃ
-                    const Text('የፎቶ/ማስረጃ ማያያዣ፦', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    // የፎቶ/የሰነድ ማስረጃዎች (ብዙ ፋይሎች)
+                    const Text('የፎቶ/የሰነድ ማስረጃዎች (ብዙ ፋይሎች)፦', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                     const SizedBox(height: 6),
                     Row(
                       children: [
                         ElevatedButton.icon(
                           onPressed: () async {
-                            final picker = ImagePicker();
-                            final img = await picker.pickImage(source: ImageSource.gallery);
-                            if (img != null) {
-                              final bytes = await img.readAsBytes();
-                              setModalState(() {
-                                pickedImagePath = img.path;
-                                pickedImageBytes = bytes;
-                              });
+                            final picked = await FilePicker.pickFiles(
+                              type: FileType.custom,
+                              allowedExtensions: ['jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx', 'xls', 'xlsx'],
+                              allowMultiple: true,
+                              withData: true,
+                            );
+                            if (picked.files.isEmpty) return;
+                            final List<_PickedAttachment> added = [];
+                            final List<String> skipped = [];
+                            int totalBytes = pickedAttachments.fold<int>(0, (s, a) => s + a.bytes.length);
+                            for (final f in picked.files) {
+                              final bytes = f.bytes ?? await f.xFile.readAsBytes();
+                              // የአገልጋዩ ገደብ፦ በአንድ ፋይል 10MB፣ ጠቅላላ 20MB።
+                              if (bytes.length > 10 * 1024 * 1024) {
+                                skipped.add(f.name);
+                                continue;
+                              }
+                              if (totalBytes + bytes.length > 20 * 1024 * 1024) {
+                                skipped.add(f.name);
+                                continue;
+                              }
+                              totalBytes += bytes.length;
+                              added.add(_PickedAttachment(name: f.name, mime: _mimeForFile(f.name), bytes: bytes));
+                            }
+                            setModalState(() => pickedAttachments.addAll(added));
+                            if (skipped.isNotEmpty && context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('ከ 10MB በላይ ወይም ጠቅላላ ከ 20MB በላይ የሆኑ ፋይሎች አልተጨመሩም፦ ${skipped.join('፣ ')}'),
+                                  backgroundColor: Colors.orange.shade800,
+                                ),
+                              );
                             }
                           },
-                          icon: const Icon(Icons.add_a_photo, size: 16),
-                          label: const Text('ፎቶ ያያይዙ'),
+                          icon: const Icon(Icons.attach_file, size: 16),
+                          label: const Text('ፋይሎች ያያይዙ'),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.grey.shade800,
                             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                           ),
                         ),
                         const SizedBox(width: 10),
-                        if (pickedImagePath != null)
-                          const Row(
-                            children: [
-                              Icon(Icons.check_circle, color: AppTheme.greenSuccess, size: 18),
-                              SizedBox(width: 4),
-                              Text('ፎቶ ተያይዟል', style: TextStyle(fontSize: 12, color: AppTheme.greenSuccess)),
-                            ],
+                        if (pickedAttachments.isNotEmpty)
+                          Text(
+                            '${pickedAttachments.length} ፋይል${pickedAttachments.length > 1 ? 'ዎች' : ''} ተያይዟል',
+                            style: const TextStyle(fontSize: 12, color: AppTheme.greenSuccess),
                           ),
                       ],
                     ),
+                    if (pickedAttachments.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      ...pickedAttachments.map((att) => Container(
+                            margin: const EdgeInsets.only(bottom: 6),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.grey.shade300),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(att.isImage ? Icons.image : Icons.insert_drive_file, size: 18, color: AppTheme.primaryMaroon),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    '${att.name} (${att.sizeLabel})',
+                                    style: const TextStyle(fontSize: 12),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.close, size: 18),
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(),
+                                  onPressed: () => setModalState(() => pickedAttachments.remove(att)),
+                                ),
+                              ],
+                            ),
+                          )),
+                    ],
                     const SizedBox(height: 20),
 
                     // የማስረከቢያ እና ወደ ቴሌግራም መላኪያ አዝራር
@@ -629,6 +685,12 @@ class _PlansScreenState extends State<PlansScreen> {
                                   'challenges': notDoneDetails,
                                   'solutions_proposed': '',
                                   'status': 'submitted',
+                                  // 2026-11-26: many attachments — the
+                                  // server stores each in report_attachments.
+                                  if (pickedAttachments.isNotEmpty)
+                                    'attachments': pickedAttachments
+                                        .map((a) => {'name': a.name, 'mime': a.mime, 'data': base64Encode(a.bytes)})
+                                        .toList(),
                                 };
 
                                 final result = await ApiService().submitReport(reportPayload);
@@ -640,7 +702,7 @@ class _PlansScreenState extends State<PlansScreen> {
                                 item.reportDetails = doneDetails;
                                 item.notDoneDetails = notDoneDetails;
                                 item.reason = notDoneDetails;
-                                item.evidencePath = pickedImagePath;
+                                item.evidencePath = pickedAttachments.isNotEmpty ? pickedAttachments.first.name : item.evidencePath;
                                 item.reportSubmittedAt = DateTime.now();
                                 item.submittedBy = senderTitle;
                                 item.updatedAt = DateTime.now();
@@ -658,11 +720,19 @@ class _PlansScreenState extends State<PlansScreen> {
                                     notDoneDetails: notDoneDetails.isEmpty ? null : notDoneDetails,
                                   );
 
-                                  // H1(d)፦ የፎቶ ማስረጃ ከተያያዘ ወደ ቴሌግራም ይላካል
-                                  if (pickedImageBytes != null) {
+                                  // H1(d)፦ የተያያዘ ፎቶ ካለ የመጀመሪያው ፎቶ
+                                  // ወደ ቴሌግራም ይላካል (እንደ ቀድሞው)።
+                                  _PickedAttachment? firstImage;
+                                  for (final a in pickedAttachments) {
+                                    if (a.isImage) {
+                                      firstImage = a;
+                                      break;
+                                    }
+                                  }
+                                  if (firstImage != null) {
                                     try {
                                       await TelegramService.sendPhoto(
-                                        imageBytes: pickedImageBytes!,
+                                        imageBytes: firstImage.bytes,
                                         fileName: 'evidence_${item.id}.jpg',
                                         caption: '📷 የ«$taskTitle» ሪፖርት ማስረጃ — $currentPercent%',
                                       );
@@ -1015,6 +1085,9 @@ class _PlansScreenState extends State<PlansScreen> {
   @override
   Widget build(BuildContext context) {
     final isSuper = AuthService.isSuperAdmin;
+    // 2026-11-26: the control department sees the department tabs too
+    // (view-only). The Excel import button below stays super-admin only.
+    final canViewAllDepts = isSuper || AuthService.canViewAll;
 
     return Scaffold(
       appBar: AppBar(
@@ -1040,8 +1113,8 @@ class _PlansScreenState extends State<PlansScreen> {
       ),
       body: Column(
         children: [
-          // ፅ/ቤት ከሆነ የክፍሎች ማጣሪያ ባር
-          if (isSuper)
+          // ፅ/ቤት ወይም ቁጥጥር (can_view_all) ከሆነ የክፍሎች ማጣሪያ ባር
+          if (canViewAllDepts)
             Container(
               height: 48,
               color: Colors.white,
@@ -1646,5 +1719,46 @@ class _PlansScreenState extends State<PlansScreen> {
         },
       ),
     );
+  }
+}
+
+/// 2026-11-26: one file picked for a report (image or document).
+class _PickedAttachment {
+  final String name;
+  final String mime;
+  final Uint8List bytes;
+  const _PickedAttachment({required this.name, required this.mime, required this.bytes});
+
+  bool get isImage => mime.startsWith('image/');
+
+  String get sizeLabel {
+    final kb = bytes.length / 1024;
+    if (kb < 1024) return '${kb.toStringAsFixed(0)} KB';
+    return '${(kb / 1024).toStringAsFixed(1)} MB';
+  }
+}
+
+/// MIME type by file extension (the server re-validates the real
+/// content type, so this is only a hint for the payload).
+String _mimeForFile(String fileName) {
+  final ext = fileName.split('.').last.toLowerCase();
+  switch (ext) {
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg';
+    case 'png':
+      return 'image/png';
+    case 'pdf':
+      return 'application/pdf';
+    case 'doc':
+      return 'application/msword';
+    case 'docx':
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    case 'xls':
+      return 'application/vnd.ms-excel';
+    case 'xlsx':
+      return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    default:
+      return 'application/octet-stream';
   }
 }
