@@ -821,6 +821,47 @@ def menu_text(user_name, linked_user):
     )
 
 
+# 2026-11-26 (link gate): a stranger sees NOTHING until the Telegram
+# account is linked. Every handler/callback checks the link first and,
+# when unlinked, answers with ONLY this message — how to link, nothing
+# else. /start <code> (the link flow itself) stays open: that is how a
+# stranger becomes linked.
+LINK_FIRST_TEXT = (
+    "\U0001f512 <b>መጀመሪያ Telegramህን አገናኝ</b>\n\n"
+    "ይህ ቦት ለተገናኙ ሰዎች ብቻ ነው — እቅዶችህን ለማየት Telegram accountህን ማገናኘት አለብህ።\n\n"
+    "በአፕ ውስጥ፦ <b>ዳሽቦርድ / ውይይት</b> → <b>Telegram</b> ቁልፍ → <b>«አገናኝ»</b> → "
+    "ኮድ አግኝተህ እዚህ <b>/start &lt;ኮድ&gt;</b> ብለህ ላክ።\n\n"
+    "ኮዱ ለ<b>15 ደቂቃ</b> ብቻ ይሰራል።"
+)
+
+
+def _link_first_kb():
+    return {"inline_keyboard": [[{"text": "\U0001f517 Telegram አገናኝ", "callback_data": "link"}]]}
+
+
+def _reply_link_first(chat_id, msg_id=None):
+    """Unlinked chat: the ONLY reply — how to link, nothing else."""
+    send_telegram_reply(chat_id, LINK_FIRST_TEXT, msg_id, _link_first_kb())
+
+
+def _edit_link_first(chat_id, message_id, cb_id):
+    """Unlinked chat tapping a button: replace the message with the link-first text."""
+    edit_message_text(chat_id, message_id, LINK_FIRST_TEXT, _link_first_kb())
+    answer_callback_query(cb_id, "Telegram ማገናኘት አለብህ።")
+
+
+def _visible_departments(user, dept_list):
+    """Departments this user may browse: all for office/audit, own only otherwise."""
+    if not dept_list:
+        return []
+    if user and (user.get("is_super_admin") or user.get("can_view_all")):
+        return list(dept_list)
+    if not user:
+        return []
+    own = str(user.get("department_id"))
+    return [d for d in dept_list if str(d.get("id")) == own]
+
+
 def render_plan_page(plans, page, prefix, title):
     """One page of plan cards. Returns (text, keyboard)."""
     plans = sort_plans_for_list(plans)
@@ -881,12 +922,12 @@ def render_plan_detail(plan, user, src):
 def find_plan(chat_id, plan_id):
     """One plan this chat may see, plus the linked user (or None)."""
     user = bot_user_by_chat(chat_id)
-    if user:
-        data = bot_api("plans_for", {"chat_id": str(chat_id)})
-        plans = (data or {}).get("plans", []) or []
-    else:
-        data = bot_api("plans_list", {})
-        plans = (data or {}).get("plans", []) or []
+    if not user:
+        # Unlinked chats see no plan at all (the link gate blocks the
+        # callbacks first; this is defense in depth).
+        return None, None
+    data = bot_api("plans_for", {"chat_id": str(chat_id)})
+    plans = (data or {}).get("plans", []) or []
     for p in plans:
         if str(p.get("id")) == str(plan_id):
             return p, user
@@ -912,17 +953,7 @@ def _start_reset(chat_id):
 def _show_myplans(chat_id, message_id, cb_id, page):
     user = bot_user_by_chat(chat_id)
     if not user:
-        edit_message_text(
-            chat_id, message_id,
-            "📌 <b>የእኔ እቅዶች</b>\n\n"
-            "የራስህን ክፍል እቅዶች ለማየት Telegramህን ማገናኘት አለብህ።\n\n"
-            "በአፕ ውስጥ Telegram አገናኝ የሚለውን ተጫን፣ ኮድ አግኝተህ እዚህ <b>/start &lt;ኮድ&gt;</b> ብለህ ላክ።",
-            {"inline_keyboard": [
-                [{"text": "🔗 Telegram አገናኝ", "callback_data": "link"}],
-                [{"text": "🏠 ዋና ማውጫ", "callback_data": "menu"}],
-            ]},
-        )
-        answer_callback_query(cb_id, "Telegram ማገናኘት አለብህ።")
+        _edit_link_first(chat_id, message_id, cb_id)
         return
     data = bot_api("plans_for", {"chat_id": str(chat_id)})
     if not data:
@@ -954,12 +985,17 @@ def _show_recent(chat_id, message_id, cb_id, page):
 
 
 def _show_summary(chat_id, message_id, cb_id):
-    data = bot_api("plans_summary", {})
+    user = bot_user_by_chat(chat_id)
+    if not user:
+        _edit_link_first(chat_id, message_id, cb_id)
+        return
+    data = bot_api("plans_summary", {"chat_id": str(chat_id)})
     if not data:
         answer_callback_query(cb_id, "ማጠቃለያ ማምጣት አልተቻለም — እንደገና ሞክር።")
         return
     depts = bot_api("departments", {}) or {}
-    dept_list = depts.get("departments") or [] if isinstance(depts, dict) else []
+    dept_list = _visible_departments(
+        user, depts.get("departments") or [] if isinstance(depts, dict) else [])
     by_dept = data.get("by_department") or {}
     lines = [
         "📊 <b>የ2019 ዓ.ም የእቅዶች ማጠቃለያ</b>",
@@ -993,21 +1029,36 @@ def _dept_name(dept_id):
 
 
 def _show_depts(chat_id, message_id, cb_id):
+    user = bot_user_by_chat(chat_id)
+    if not user:
+        _edit_link_first(chat_id, message_id, cb_id)
+        return
     depts = bot_api("departments", {}) or {}
-    dept_list = depts.get("departments") or [] if isinstance(depts, dict) else []
+    dept_list = _visible_departments(
+        user, depts.get("departments") or [] if isinstance(depts, dict) else [])
     if not dept_list:
+        # API down: regular users see only their own department.
+        if user.get("is_super_admin") or user.get("can_view_all"):
+            fallback = (
+                "🏛️ <b>የሰንበት ትምህርት ቤቱ ክፍሎች ዝርዝር፦</b>\n\n"
+                "1. ትምህርት እና ስልጠና ክፍል\n"
+                "2. መርሃግብር እና ጉባኤያት ክፍል\n"
+                "3. መዝሙርና ስነጥበብ ክፍል\n"
+                "4. ልማትና በጎ አድራጎት ክፍል\n"
+                "5. መረጃና የውስጥ ግንኙነት ክፍል\n"
+                "6. ቁጥጥር ክፍል\n"
+                "7. በጀት እና ንብረት አስተዳደር ክፍል\n"
+                "8. ሰው ሀብት አስተዳደር ክፍል\n"
+                "9. ጽ/ቤት\n"
+            )
+        else:
+            fallback = (
+                "🏛️ <b>የሰንበት ትምህርት ቤቱ ክፍሎች ዝርዝር፦</b>\n\n"
+                f"• {user.get('department_name', '')}\n\n"
+                "የራስህ ክፍል እቅዶች ብቻ ማየት ትችላለህ።"
+            )
         edit_message_text(
-            chat_id, message_id,
-            "🏛️ <b>የሰንበት ትምህርት ቤቱ ክፍሎች ዝርዝር፦</b>\n\n"
-            "1. ትምህርት እና ስልጠና ክፍል\n"
-            "2. መርሃግብር እና ጉባኤያት ክፍል\n"
-            "3. መዝሙርና ስነጥበብ ክፍል\n"
-            "4. ልማትና በጎ አድራጎት ክፍል\n"
-            "5. መረጃና የውስጥ ግንኙነት ክፍል\n"
-            "6. ቁጥጥር ክፍል\n"
-            "7. በጀት እና ንብረት አስተዳደር ክፍል\n"
-            "8. ሰው ሀብት አስተዳደር ክፍል\n"
-            "9. ጽ/ቤት\n",
+            chat_id, message_id, fallback,
             {"inline_keyboard": kb_home_row()},
         )
         answer_callback_query(cb_id)
@@ -1026,7 +1077,15 @@ def _show_depts(chat_id, message_id, cb_id):
 
 
 def _show_dept_plans(chat_id, message_id, cb_id, dept_id, page):
-    data = bot_api("plans_list", {"department_id": dept_id})
+    user = bot_user_by_chat(chat_id)
+    if not user:
+        _edit_link_first(chat_id, message_id, cb_id)
+        return
+    if not (user.get("is_super_admin") or user.get("can_view_all")) \
+            and str(dept_id) != str(user.get("department_id")):
+        answer_callback_query(cb_id, "የራስህ ክፍል እቅዶች ብቻ ማየት ትችላለህ።")
+        dept_id = user.get("department_id")
+    data = bot_api("plans_list", {"department_id": dept_id, "chat_id": str(chat_id)})
     if not data:
         answer_callback_query(cb_id, "እቅዶችን ማምጣት አልተቻለም — እንደገና ሞክር።")
         return
@@ -1091,6 +1150,22 @@ def handle_callback_query(callback):
     chat_id = (msg.get("chat") or {}).get("id")
     message_id = msg.get("message_id")
     if not data:
+        return
+    # Link gate: a stranger gets ONLY the link-first message, except the
+    # "link" button itself (it shows how to link) — no menu, no plans,
+    # no departments, no info, no reset, no approve/reject.
+    _linked = bot_user_by_chat(chat_id)
+    if not _linked:
+        if data == "link" or data.startswith("link:"):
+            answer_callback_query(cb_id)
+            send_telegram_reply(
+                chat_id,
+                "🔗 <b>Telegram ማገናኘት</b>\n\n"
+                "በአፕ ውስጥ፦ <b>ዳሽቦርድ / ውይይት</b> → <b>Telegram</b> ቁልፍ → <b>«አገናኝ»</b> → ኮድ አግኝተህ እዚህ <b>/start &lt;ኮድ&gt;</b> ብለህ ላክ።\n\n"
+                "ኮዱ ለ<b>15 ደቂቃ</b> ብቻ ይሰራል።",
+            )
+        else:
+            _edit_link_first(chat_id, message_id, cb_id)
         return
     if data.startswith("review:"):
         try:
@@ -1206,7 +1281,10 @@ def handle_update(update):
                     msg_id,
                 )
             return
-        send_telegram_reply(chat_id, menu_text(user_name, linked_user), msg_id, kb_menu())
+        if linked_user:
+            send_telegram_reply(chat_id, menu_text(user_name, linked_user), msg_id, kb_menu())
+        else:
+            _reply_link_first(chat_id, msg_id)
 
     elif text.startswith("/reset"):
         _start_reset(chat_id)
@@ -1218,20 +1296,15 @@ def handle_update(update):
         _reset_pending.pop(str(chat_id), None)
         send_telegram_reply(chat_id, "ተቋርጧል — ምንም አልተቀየረም።", msg_id)
 
+    # Link gate: from here on, only linked chats proceed. A stranger
+    # gets ONLY the link-first message — no menu, no plans, no
+    # departments, no info, no reset, no free-text answers.
+    if not linked_user:
+        _reset_pending.pop(str(chat_id), None)
+        _reply_link_first(chat_id, msg_id)
+        return
+
     elif text.startswith("/myplans"):
-        if not linked_user:
-            send_telegram_reply(
-                chat_id,
-                "📌 <b>የእኔ እቅዶች</b>\n\n"
-                "የራስህን ክፍል እቅዶች ለማየት Telegramህን ማገናኘት አለብህ።\n\n"
-                "በአፕ ውስጥ Telegram አገናኝ የሚለውን ተጫን፣ ኮድ አግኝተህ እዚህ <b>/start &lt;ኮድ&gt;</b> ብለህ ላክ።",
-                msg_id,
-                {"inline_keyboard": [
-                    [{"text": "🔗 Telegram አገናኝ", "callback_data": "link"}],
-                    [{"text": "🏠 ዋና ማውጫ", "callback_data": "menu"}],
-                ]},
-            )
-            return
         data = bot_api("plans_for", {"chat_id": str(chat_id)})
         if not data:
             send_telegram_reply(chat_id, "⚠️ እቅዶችን ማምጣት አልተቻለም — እባክዎ ትንሽ ቆይተህ እንደገና ሞክር።", msg_id)
@@ -1259,20 +1332,28 @@ def handle_update(update):
 
     elif text.startswith("/depts"):
         depts = bot_api("departments", {}) or {}
-        dept_list = depts.get("departments") or [] if isinstance(depts, dict) else []
+        dept_list = _visible_departments(
+            linked_user, depts.get("departments") or [] if isinstance(depts, dict) else [])
         if not dept_list:
-            depts_text = (
-                "🏛️ <b>የሰንበት ትምህርት ቤቱ ክፍሎች ዝርዝር፦</b>\n\n"
-                "1. ትምህርት እና ስልጠና ክፍል\n"
-                "2. መርሃግብር እና ጉባኤያት ክፍል\n"
-                "3. መዝሙርና ስነጥበብ ክፍል\n"
-                "4. ልማትና በጎ አድራጎት ክፍል\n"
-                "5. መረጃና የውስጥ ግንኙነት ክፍል\n"
-                "6. ቁጥጥር ክፍል\n"
-                "7. በጀት እና ንብረት አስተዳደር ክፍል\n"
-                "8. ሰው ሀብት አስተዳደር ክፍል\n"
-                "9. ጽ/ቤት\n"
-            )
+            if linked_user.get("is_super_admin") or linked_user.get("can_view_all"):
+                depts_text = (
+                    "🏛️ <b>የሰንበት ትምህርት ቤቱ ክፍሎች ዝርዝር፦</b>\n\n"
+                    "1. ትምህርት እና ስልጠና ክፍል\n"
+                    "2. መርሃግብር እና ጉባኤያት ክፍል\n"
+                    "3. መዝሙርና ስነጥበብ ክፍል\n"
+                    "4. ልማትና በጎ አድራጎት ክፍል\n"
+                    "5. መረጃና የውስጥ ግንኙነት ክፍል\n"
+                    "6. ቁጥጥር ክፍል\n"
+                    "7. በጀት እና ንብረት አስተዳደር ክፍል\n"
+                    "8. ሰው ሀብት አስተዳደር ክፍል\n"
+                    "9. ጽ/ቤት\n"
+                )
+            else:
+                depts_text = (
+                    "🏛️ <b>የሰንበት ትምህርት ቤቱ ክፍሎች ዝርዝር፦</b>\n\n"
+                    f"• {linked_user.get('department_name', '')}\n\n"
+                    "የራስህ ክፍል እቅዶች ብቻ ማየት ትችላለህ።"
+                )
             send_telegram_reply(chat_id, depts_text, msg_id)
             return
         lines = ["🏛️ <b>የሰንበት ትምህርት ቤቱ ክፍሎች፦</b>", _DIV, ""]
@@ -1287,10 +1368,17 @@ def handle_update(update):
         send_telegram_reply(chat_id, "\n".join(lines), msg_id, {"inline_keyboard": rows})
 
     elif text.startswith("/plans") or text.startswith("/plan"):
-        data = bot_api("plans_summary", {})
+        data = bot_api("plans_summary", {"chat_id": str(chat_id)})
         if not data:
             # LIVE አገልጋዩ ካልተገኘ ወደ ቀድሞው የፋይል ምንጭ መመለስ።
             plans = get_plans_from_database()
+            if not (linked_user.get("is_super_admin") or linked_user.get("can_view_all")):
+                own_id = str(linked_user.get("department_id"))
+                own_name = linked_user.get("department_name", "")
+                plans = [p for p in plans
+                         if str(p.get("departmentId") or "") == own_id
+                         or str(p.get("department") or "") == own_id
+                         or (p.get("department_name") or "") == own_name]
             total = len(plans)
             if total == 0:
                 send_telegram_reply(chat_id, "⚠️ በአሁኑ ወቅት የተመዘገበ እቅድ አልተገኘም።", msg_id)
@@ -1313,7 +1401,8 @@ def handle_update(update):
         ]
         rows = []
         depts = bot_api("departments", {}) or {}
-        dept_list = depts.get("departments") or [] if isinstance(depts, dict) else []
+        dept_list = _visible_departments(
+            linked_user, depts.get("departments") or [] if isinstance(depts, dict) else [])
         by_dept = data.get("by_department") or {}
         for d in dept_list:
             name = d.get("name") or ""

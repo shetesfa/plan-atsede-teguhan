@@ -19,8 +19,8 @@
 //   user_by_chat  {chat_id}                  — who owns this chat (if linked)
 //   plans_for     {chat_id}                  — LIVE plans for that user's department
 //   recent_for    {chat_id}                  — plans due in the next 7 days (+overdue)
-//   plans_summary {}                         — LIVE counts by department (all)
-//   plans_list    {department_id?}           — LIVE plan list (all or one dept)
+//   plans_summary {chat_id}                  — LIVE counts, dept-scoped (linked only)
+//   plans_list    {department_id?, chat_id}   — LIVE plan list, dept-scoped (linked only)
 //   departments   {}                         — live department list (id, name)
 //   plan_progress {plan_id, progress, chat_id} — update progress from Telegram
 //   reset_request {username}                 — create a reset code (bot sends it)
@@ -261,7 +261,10 @@ if ($action === 'plans_for') {
 if ($action === 'recent_for') {
     $chatId = trim((string)($input['chat_id'] ?? ''));
     $user = botUserByChat($pdo, $chatId);
-    // ያልተገናኘ chat የሁሉም ክፍል ማጠቃለያ ያያል (እንደ ዛሬው /plans)።
+    // 2026-11-26 (link gate): unlinked chats see nothing at all.
+    if (!$user) {
+        jsonError('ይህ Telegram account ከስርዓቱ ጋር አልተገናኘም', 404);
+    }
     $dept = null;
     if ($user && empty($user['is_super_admin']) && empty($user['can_view_all'])) {
         $dept = $user['department_id'];
@@ -286,9 +289,20 @@ if ($action === 'recent_for') {
     ]);
 }
 
-// 5. LIVE ማጠቃለያ — የሁሉም ክፍል እቅድ ብዛት (Live counts by department)
+// 5. LIVE ማጠቃለያ — የክፍል እቅድ ብዛት (Live counts by department)
+// 2026-11-26 (link gate): linked chats only; regular users see ONLY
+// their own department's counts (office/audit see all).
 if ($action === 'plans_summary') {
-    $plans = botFetchLivePlans($pdo, null);
+    $chatId = trim((string)($input['chat_id'] ?? ''));
+    $user = botUserByChat($pdo, $chatId);
+    if (!$user) {
+        jsonError('ይህ Telegram account ከስርዓቱ ጋር አልተገናኘም', 404);
+    }
+    $dept = null;
+    if (empty($user['is_super_admin']) && empty($user['can_view_all'])) {
+        $dept = $user['department_id'];
+    }
+    $plans = botFetchLivePlans($pdo, $dept);
     $byDept = [];
     foreach ($plans as $p) {
         $name = $p['department_name'];
@@ -302,9 +316,19 @@ if ($action === 'plans_summary') {
     ]);
 }
 
-// 6. LIVE እቅድ ዝርዝር — ሁሉም ወይም አንድ ክፍል (Live plan list)
+// 6. LIVE እቅድ ዝርዝር — አንድ ክፍል (Live plan list)
+// 2026-11-26 (link gate): linked chats only; regular users are forced
+// to their own department (a requested other department is ignored).
 if ($action === 'plans_list') {
+    $chatId = trim((string)($input['chat_id'] ?? ''));
+    $user = botUserByChat($pdo, $chatId);
+    if (!$user) {
+        jsonError('ይህ Telegram account ከስርዓቱ ጋር አልተገናኘም', 404);
+    }
     $dept = $input['department_id'] ?? null;
+    if (empty($user['is_super_admin']) && empty($user['can_view_all'])) {
+        $dept = $user['department_id'];
+    }
     $plans = botFetchLivePlans($pdo, ($dept === '' ? null : $dept));
     $counts = botPlanCounts($plans, $todayStr, $weekStr);
     jsonResponse([
