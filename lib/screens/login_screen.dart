@@ -100,7 +100,9 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
 
   /// የይለፍ ቃል በ Telegram ኮድ ዳግም ማስጀመሪያ ማውጫ (PR #31)
   Future<void> _showResetPasswordDialog() async {
-    final usernameController = TextEditingController(text: selectedDept.id);
+    // ክፍሉን በአማርኛ ስም የሚያሳይ dropdown — የተጠቃሚ ስም (ክፍል) መስኩ
+    // የእንግሊዝኛውን id (ለምሳሌ "mezmur") አያሳይም።
+    Department selectedResetDept = selectedDept;
     final codeController = TextEditingController();
     final newPasswordController = TextEditingController();
     final confirmPasswordController = TextEditingController();
@@ -112,15 +114,11 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) {
           Future<void> submit() async {
-            final username = usernameController.text.trim();
+            final username = selectedResetDept.id;
             final code = codeController.text.trim();
             final newPassword = newPasswordController.text;
             final confirmPassword = confirmPasswordController.text;
 
-            if (username.isEmpty) {
-              setDialogState(() => dialogError = 'እባክዎ የተጠቃሚ ስም (ክፍል) ያስገቡ።');
-              return;
-            }
             if (code.length != 6 || int.tryParse(code) == null) {
               setDialogState(() => dialogError = 'እባክዎ 6 አሃዝ ኮድ ያስገቡ።');
               return;
@@ -166,12 +164,44 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                     style: TextStyle(fontSize: 13),
                   ),
                   const SizedBox(height: 16),
-                  TextField(
-                    controller: usernameController,
-                    decoration: const InputDecoration(
-                      labelText: 'የተጠቃሚ ስም (ክፍል)',
-                      border: OutlineInputBorder(),
-                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  const Text(
+                    'ክፍልዎን ይምረጡ',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF2D2A26)),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFAFAFA),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<Department>(
+                        value: selectedResetDept,
+                        isExpanded: true,
+                        icon: const Icon(Icons.arrow_drop_down_circle_outlined, color: AppTheme.primaryMaroon, size: 20),
+                        items: Department.allDepartments
+                            .map(
+                              (dept) => DropdownMenuItem(
+                                value: dept,
+                                child: Text(
+                                  dept.name,
+                                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Color(0xFF2D2A26)),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (val) {
+                          if (val != null) {
+                            setDialogState(() {
+                              selectedResetDept = val;
+                              dialogError = null;
+                            });
+                          }
+                        },
+                      ),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -232,7 +262,6 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
       ),
     );
 
-    usernameController.dispose();
     codeController.dispose();
     newPasswordController.dispose();
     confirmPasswordController.dispose();
