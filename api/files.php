@@ -90,6 +90,24 @@ if (!$filePath) {
     }
 }
 
+// 3b. ያልታቀዱ ስራዎች ማስረጃ ፎቶ (2026-11-26: evidence bytes live in
+// unplanned_activities.evidence_data — same BLOB pattern as report
+// attachments; download with the activity id, e.g. files.php?id=<activity id>).
+if (!$filePath) {
+    $uStmt = $pdo->prepare("SELECT id, department_id, evidence_path, evidence_mime, evidence_data FROM unplanned_activities WHERE id = ? AND is_deleted = 0 LIMIT 1");
+    $uStmt->execute([$id]);
+    $unplanned = $uStmt->fetch();
+    if ($unplanned && $unplanned['evidence_data'] !== null && $unplanned['evidence_data'] !== '') {
+        // Marker only — the blob-serve block (4a) below serves it; the
+        // marker never reaches the filesystem.
+        $filePath = 'unplanned:' . $unplanned['id'];
+        $fileName = $unplanned['evidence_path'] ?: 'evidence.jpg';
+        $fileType = $unplanned['evidence_mime'] ?: 'image/jpeg';
+        $fileDept = $unplanned['department_id'];
+        $blobData = $unplanned['evidence_data'];
+    }
+}
+
 if (!$filePath) {
     jsonError('ፋይሉ አልተገኘም ወይም ተሰርዟል', 404);
 }

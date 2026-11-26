@@ -733,4 +733,101 @@ class ApiService {
       return {'success': false, 'message': 'የአውታረ-መረብ ስህተት፦ $e'};
     }
   }
+
+  // 18. ያልታቀዱ ግን የተከናወኑ ስራዎች (Unplanned activities — server storage,
+  // 2026-11-26). Before this they lived only in the phone's memory and an
+  // app restart wiped them. fetchUnplannedActivities throws ApiException
+  // on failure (like fetchPlans) so the caller can tell "server
+  // unreachable" apart from "no activities".
+  Future<List<Map<String, dynamic>>> fetchUnplannedActivities({String? department, String? from, String? to}) async {
+    final queryParams = <String, String>{};
+    if (department != null && department.isNotEmpty && department != 'all') queryParams['department'] = department;
+    if (from != null && from.isNotEmpty) queryParams['from'] = from;
+    if (to != null && to.isNotEmpty) queryParams['to'] = to;
+
+    final uri = Uri.parse('$baseUrl/unplanned.php').replace(queryParameters: queryParams);
+    http.Response res;
+    try {
+      res = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 30));
+    } catch (e) {
+      lastError = 'የአገልጋይ ግንኙነት አልተሳካም፦ $e';
+      throw ApiException(lastError!);
+    }
+    if (res.statusCode != 200) {
+      lastError = 'አገልጋዩ ስህተት መልሷል (HTTP ${res.statusCode})';
+      throw ApiException(lastError!, res.statusCode);
+    }
+    try {
+      final data = jsonDecode(res.body);
+      if (data['status'] == 'success' && data['data'] is List) {
+        lastError = null;
+        return List<Map<String, dynamic>>.from(data['data']);
+      }
+      lastError = data['message']?.toString() ?? 'አገልጋዩ ያልተጠበቀ መልስ ሰጥቷል';
+      throw ApiException(lastError!, res.statusCode);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      lastError = 'የአገልጋዩን መልስ ማንበብ አልተቻለም፦ $e';
+      throw ApiException(lastError!);
+    }
+  }
+
+  /// ያልታቀደ ስራ መመዝገብ — data is the snake_case body from
+  /// UnplannedActivity.toServerJson() plus optional evidence_base64 +
+  /// evidence_name. Returns {'success', 'data' (saved server row)}.
+  Future<Map<String, dynamic>> createUnplannedActivity(Map<String, dynamic> data) async {
+    final url = Uri.parse('$baseUrl/unplanned.php');
+    try {
+      final res = await http.post(
+        url,
+        headers: _headers,
+        body: jsonEncode(data),
+      ).timeout(const Duration(seconds: 30));
+
+      final body = jsonDecode(res.body);
+      if ((res.statusCode == 200 || res.statusCode == 201) && body['status'] == 'success') {
+        return {'success': true, 'data': body['data']};
+      }
+      return {'success': false, 'message': body['message'] ?? 'ስራውን መመዝገብ አልተቻለም'};
+    } catch (e) {
+      return {'success': false, 'message': 'የአውታረ-መረብ ስህተት፦ $e'};
+    }
+  }
+
+  /// ያልታቀደ ስራ ማሻሻል (status ጨምሮ — ፅ/ቤት ብቻ ማጽደቅ ይችላል)።
+  Future<Map<String, dynamic>> updateUnplannedActivity(String id, Map<String, dynamic> data) async {
+    final url = Uri.parse('$baseUrl/unplanned.php');
+    try {
+      final res = await http.put(
+        url,
+        headers: _headers,
+        body: jsonEncode({'id': id, ...data}),
+      ).timeout(const Duration(seconds: 30));
+
+      final body = jsonDecode(res.body);
+      if (res.statusCode == 200 && body['status'] == 'success') {
+        return {'success': true, 'data': body['data']};
+      }
+      return {'success': false, 'message': body['message'] ?? 'ስራውን ማሻሻል አልተቻለም'};
+    } catch (e) {
+      return {'success': false, 'message': 'የአውታረ-መረብ ስህተት፦ $e'};
+    }
+  }
+
+  /// ያልታቀደ ስራ መሰረዝ (soft delete — super-admin, or dept_admin own dept).
+  Future<Map<String, dynamic>> deleteUnplannedActivity(String id) async {
+    final url = Uri.parse('$baseUrl/unplanned.php?id=$id');
+    try {
+      final res = await http.delete(url, headers: _headers).timeout(const Duration(seconds: 30));
+
+      final body = jsonDecode(res.body);
+      if (res.statusCode == 200 && body['status'] == 'success') {
+        return {'success': true};
+      }
+      return {'success': false, 'message': body['message'] ?? 'ስራውን መሰረዝ አልተቻለም'};
+    } catch (e) {
+      return {'success': false, 'message': 'የአውታረ-መረብ ስህተት፦ $e'};
+    }
+  }
 }

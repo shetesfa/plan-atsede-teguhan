@@ -105,18 +105,38 @@ class _ChatScreenState extends State<ChatScreen> {
     TelegramService.addLocalMessage(tempMsg);
     _scrollToBottom();
 
-    await TelegramService.sendGroupChatMessage(
-      text: text,
-      senderDept: deptName,
-      senderName: senderTitle,
-    );
+    // 2026-11-26: the send result was ignored — a failed send looked
+    // delivered and the message was lost on restart (in-memory only).
+    // On failure the optimistic bubble is removed and the typed text is
+    // put back so nothing is lost.
+    bool sent = false;
+    try {
+      sent = await TelegramService.sendGroupChatMessage(
+        text: text,
+        senderDept: deptName,
+        senderName: senderTitle,
+      );
+    } catch (_) {
+      sent = false;
+    }
 
     if (mounted) {
       setState(() => _isSending = false);
+      if (!sent) {
+        TelegramService.removeLocalMessage(tempMsg.messageId);
+        messageController.text = text;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('መልእክቱ አልተላከም — ኢንተርኔትዎን ፈትሸው እንደገና ይሞክሩ።'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
   Future<void> _pickAnyFile() async {
+    TelegramLiveMessage? pendingMsg;
     try {
       final files = await FilePicker.pickFiles();
       if (files.isNotEmpty) {
@@ -142,10 +162,13 @@ class _ChatScreenState extends State<ChatScreen> {
           isMe: true,
           documentName: fileName,
         );
+        pendingMsg = tempMsg;
         TelegramService.addLocalMessage(tempMsg);
         _scrollToBottom();
 
-        await TelegramService.sendDocument(
+        // 2026-11-26: the send result was ignored — a failed send looked
+        // delivered and the file was lost on restart (in-memory only).
+        final sent = await TelegramService.sendDocument(
           fileBytes: fileBytes,
           fileName: fileName,
           caption: caption,
@@ -153,10 +176,23 @@ class _ChatScreenState extends State<ChatScreen> {
 
         if (mounted) {
           setState(() => _isSending = false);
+          if (!sent) {
+            TelegramService.removeLocalMessage(tempMsg.messageId);
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('ፋይል መላክ አልተቻለም — ኢንተርኔትዎን ፈትሸው እንደገና ይሞክሩ።'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
         }
       }
     } catch (e) {
+      if (pendingMsg != null) {
+        TelegramService.removeLocalMessage(pendingMsg.messageId);
+      }
       if (mounted) {
+        setState(() => _isSending = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('ፋይል መላክ አልተቻለም: $e'), backgroundColor: Colors.red),
         );
@@ -165,6 +201,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _pickImage() async {
+    TelegramLiveMessage? pendingMsg;
     try {
       final picker = ImagePicker();
       final img = await picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
@@ -189,10 +226,13 @@ class _ChatScreenState extends State<ChatScreen> {
           isMe: true,
           localImageBytes: bytes,
         );
+        pendingMsg = tempMsg;
         TelegramService.addLocalMessage(tempMsg);
         _scrollToBottom();
 
-        await TelegramService.sendPhoto(
+        // 2026-11-26: the send result was ignored — a failed send looked
+        // delivered and the photo was lost on restart (in-memory only).
+        final sent = await TelegramService.sendPhoto(
           imageBytes: bytes,
           fileName: img.name,
           caption: caption,
@@ -200,10 +240,23 @@ class _ChatScreenState extends State<ChatScreen> {
 
         if (mounted) {
           setState(() => _isSending = false);
+          if (!sent) {
+            TelegramService.removeLocalMessage(tempMsg.messageId);
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('ፎቶ መላክ አልተቻለም — ኢንተርኔትዎን ፈትሸው እንደገና ይሞክሩ።'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
         }
       }
     } catch (e) {
+      if (pendingMsg != null) {
+        TelegramService.removeLocalMessage(pendingMsg.messageId);
+      }
       if (mounted) {
+        setState(() => _isSending = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('ፎቶ መላክ አልተቻለም: $e'), backgroundColor: Colors.red),
         );
