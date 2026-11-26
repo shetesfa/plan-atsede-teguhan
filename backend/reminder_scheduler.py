@@ -258,7 +258,7 @@ def main():
                         help="Days ahead a target_date counts as due soon (default 7)")
     args = parser.parse_args()
 
-    print("🚀 የአጸደ ትጉሃን የጀርባ አስታዋሽ አገልግሎት ጀመረ (Africa/Addis_Ababa)...")
+    print("🚀 የዐጸደ ትጉሃን የጀርባ አስታዋሽ አገልግሎት ጀመረ (Africa/Addis_Ababa)...")
     if args.loop:
         try:
             interval = int(os.environ.get("REMINDER_INTERVAL_MINUTES", "60"))

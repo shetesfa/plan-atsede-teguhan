@@ -112,7 +112,7 @@ class _PlanCalendarScreenState extends State<PlanCalendarScreen> {
 
     final buffer = StringBuffer();
     buffer.writeln('🚨 <b>ይፋዊ የእቅድ ክትትል እና የጊዜ ማሳሰቢያ ማስጠንቀቂያ</b>');
-    buffer.writeln('🏛 <b>አጸደ ትጉሃን ሰ/ት/ቤት ዋና ጽ/ቤት</b>\n');
+    buffer.writeln('🏛 <b>ዐጸደ ትጉሃን ሰ/ት/ቤት ዋና ጽ/ቤት</b>\n');
     buffer.writeln('በጥቅምት ወር መርሃ-ግብር መሰረት የማስፈጸሚያ ጊዜያቸው ያለፈባቸው (ያዘገዩ) እቅዶች ዝርዝር፦\n');
 
     final Map<String, List<PlanItem>> grouped = {};

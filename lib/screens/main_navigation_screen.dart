@@ -190,7 +190,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
               CircularProgressIndicator(color: AppTheme.primaryMaroon),
               SizedBox(height: 16),
               Text(
-                'የአጸደ ትጉሃን እቅድ እየተጫነ ነው...',
+                'የዐጸደ ትጉሃን እቅድ እየተጫነ ነው...',
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
               ),
             ],
@@ -395,7 +395,7 @@ class DocumentsHubScreen extends StatelessWidget {
               icon: Icons.mail_outline,
               iconColor: AppTheme.primaryMaroon,
               title: 'ይፋዊ ደብዳቤ መጻፊያ',
-              subtitle: 'ለማንኛውም አካል በአጸደ ትጉሃን አርማ እና ፎርማት ይፋዊ ደብዳቤ አዘጋጅተው ወደ PDF ያውጡ።',
+              subtitle: 'ለማንኛውም አካል በዐጸደ ትጉሃን አርማ እና ፎርማት ይፋዊ ደብዳቤ አዘጋጅተው ወደ PDF ያውጡ።',
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(builder: (ctx) => const LetterGeneratorScreen()),
@@ -502,7 +502,7 @@ class DocumentsHubScreen extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           const Text(
-            'አጸደ ትጉሃን ሰንበት ት/ቤት',
+            'ዐጸደ ትጉሃን ሰንበት ት/ቤት',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: Colors.white,
@@ -586,7 +586,7 @@ class DocumentsHubScreen extends StatelessWidget {
                     const SizedBox(width: 8),
                     const Expanded(
                       child: Text(
-                        'አጸደ ትጉሃን ሰንበት ት/ቤት',
+                        'ዐጸደ ትጉሃን ሰንበት ት/ቤት',
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.bold,

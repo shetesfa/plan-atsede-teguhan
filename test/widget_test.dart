@@ -153,7 +153,7 @@ void main() {
         (WidgetTester tester) async {
       await pumpLogin(tester);
 
-      expect(find.text('ዓጸደ ትጉሃን ሰንበት ት/ቤት'), findsOneWidget);
+      expect(find.text('ዐጸደ ትጉሃን ሰንበት ት/ቤት'), findsOneWidget);
       expect(find.text('የአመራር መግቢያ በር'), findsOneWidget);
       expect(find.text('ክፍልዎን ይምረጡ'), findsOneWidget);
       expect(find.text('የይለፍ ቃል'), findsWidgets);

@@ -4,7 +4,7 @@ import '../services/auth_service.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 
-/// ዘመናዊ፣ ውብ እና የተቀናጀ የአጸደ ትጉሃን የመግቢያ ገጽ (Modern Ecclesiastical Login Portal)
+/// ዘመናዊ፣ ውብ እና የተቀናጀ የዐጸደ ትጉሃን የመግቢያ ገጽ (Modern Ecclesiastical Login Portal)
 class LoginScreen extends StatefulWidget {
   final VoidCallback onLoginSuccess;
 
@@ -188,7 +188,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                   _buildEmblemAvatar(size: 190),
                   const SizedBox(height: 28),
                   const Text(
-                    'ዓጸደ ትጉሃን ሰንበት ት/ቤት',
+                    'ዐጸደ ትጉሃን ሰንበት ት/ቤት',
                     style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.bold,
@@ -241,7 +241,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
           _buildEmblemAvatar(size: 130),
           const SizedBox(height: 18),
           const Text(
-            'ዓጸደ ትጉሃን ሰንበት ት/ቤት',
+            'ዐጸደ ትጉሃን ሰንበት ት/ቤት',
             style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.bold,

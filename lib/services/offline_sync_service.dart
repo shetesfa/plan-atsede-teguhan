@@ -4,7 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'api_service.dart';
 import 'auth_service.dart';
 
-/// የአጸደ ትጉሃን ከመስመር ውጭ ማስተዳደሪያ እና ማመሳከሪያ አገልግሎት (Offline-First Sync & User-Scoped Cache)
+/// የዐጸደ ትጉሃን ከመስመር ውጭ ማስተዳደሪያ እና ማመሳከሪያ አገልግሎት (Offline-First Sync & User-Scoped Cache)
 class OfflineSyncService {
   static const String _prefPendingQueueKey = 'atsede_pending_sync_queue';
   static const String _prefPlansCachePrefix = 'atsede_cached_plans_';

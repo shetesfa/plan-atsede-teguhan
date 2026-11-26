@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {
-  // የአጸደ ትጉሃን ፕሪሚየም ይፋዊ ቀለሞች (Royal Modern Palette)
+  // የዐጸደ ትጉሃን ፕሪሚየም ይፋዊ ቀለሞች (Royal Modern Palette)
   static const Color primaryMaroon = Color(0xFF7A1321); // ጥልቅ ሮያል ማሩን
   static const Color darkMaroon = Color(0xFF4A0A13); // የከበረ ማሩን
   static const Color accentMaroon = Color(0xFF9E1B2D); // ደማቅ ማሩን

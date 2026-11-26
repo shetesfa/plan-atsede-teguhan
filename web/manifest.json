@@ -1,11 +1,11 @@
 {
-    "name": "አጸደ ትጉሃን ሰንበት ት/ቤት",
-    "short_name": "አጸደ ትጉሃን",
+    "name": "ዐጸደ ትጉሃን ሰንበት ት/ቤት",
+    "short_name": "ዐጸደ ትጉሃን",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#7A1321",
     "theme_color": "#7A1321",
-    "description": "የአጸደ ትጉሃን ሰንበት ትምህርት ቤት እቅድ አስተዳደር እና መገናኛ ስርዓት — እቅዶች፣ ሪፖርቶች፣ ቀን መቁጠሪያ እና ይፋዊ ሰነዶች።",
+    "description": "የዐጸደ ትጉሃን ሰንበት ትምህርት ቤት እቅድ አስተዳደር እና መገናኛ ስርዓት — እቅዶች፣ ሪፖርቶች፣ ቀን መቁጠሪያ እና ይፋዊ ሰነዶች።",
     "orientation": "any",
     "prefer_related_applications": false,
     "icons": [
