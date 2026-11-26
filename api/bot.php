@@ -21,6 +21,8 @@
 //   recent_for    {chat_id}                  — plans due in the next 7 days (+overdue)
 //   plans_summary {}                         — LIVE counts by department (all)
 //   plans_list    {department_id?}           — LIVE plan list (all or one dept)
+//   departments   {}                         — live department list (id, name)
+//   plan_progress {plan_id, progress, chat_id} — update progress from Telegram
 //   reset_request {username}                 — create a reset code (bot sends it)
 //   reset_verify  {user_id, code, new_password} — verify code + set new password
 //   report_review {report_id, action, chat_id, comment?} — office approve/reject
@@ -309,6 +311,56 @@ if ($action === 'plans_list') {
         'plans' => $plans,
         'total' => $counts['total'],
         'overdue_count' => $counts['overdue_count'],
+    ]);
+}
+
+// 10. ክፍሎች ዝርዝር — ለቦቱ ክፍል ቁልፎች (Departments list, live)
+if ($action === 'departments') {
+    $stmt = $pdo->query("SELECT id, name, short_name FROM departments ORDER BY id ASC");
+    jsonResponse(['departments' => $stmt->fetchAll()]);
+}
+
+// 11. እቅድ ክንውን ከቦቱ — Progress update from Telegram.
+// Same update as plans.php PUT (clamp 0–100, 100% → completed,
+// version +1, audit log), but the caller is a LINKED Telegram
+// chat, not a JWT: the clicker must be a member of the plan's
+// own department. The office and audit are view-only in the bot
+// — they update progress from the app only.
+if ($action === 'plan_progress') {
+    $planId = trim((string)($input['plan_id'] ?? ''));
+    $progress = isset($input['progress']) ? max(0, min(100, (int)$input['progress'])) : null;
+    $chatId = trim((string)($input['chat_id'] ?? ''));
+    if ($planId === '' || $chatId === '' || $progress === null) {
+        jsonError('የዕቅድ መለያ፣ ክንውን እና Chat ID ያስፈልጋሉ', 400);
+    }
+    $user = botUserByChat($pdo, $chatId);
+    if (!$user) {
+        jsonError('ይህ Telegram account ከስርዓቱ ጋር አልተገናኘም', 403);
+    }
+    if (!empty($user['is_super_admin']) || !empty($user['can_view_all'])) {
+        jsonError('ጽ/ቤት እና ቁጥጥር እቅድ ክንውን ከአፕ ውስጥ ብቻ ነው የሚያዘምኑት', 403);
+    }
+    $stmt = $pdo->prepare("SELECT id, department_id, status FROM plans WHERE id = ?");
+    $stmt->execute([$planId]);
+    $plan = $stmt->fetch();
+    if (!$plan) {
+        jsonError('እቅዱ አልተገኘም', 404);
+    }
+    if ($plan['department_id'] !== $user['department_id']) {
+        jsonError('የሌላ ክፍል እቅድ ክንውን ማዘመን አይቻልም', 403);
+    }
+    $status = $progress >= 100 ? 'completed' : null;
+    $pdo->prepare("UPDATE plans SET progress_percent = ?, status = COALESCE(?, status), version = version + 1 WHERE id = ?")
+        ->execute([$progress, $status, $planId]);
+    logAudit($pdo, 'update_plan_progress', 'plans', $planId, (int)$user['id'], $user['department_id'], [
+        'progress_percent' => $progress,
+        'status' => $status,
+        'via' => 'telegram',
+    ]);
+    jsonResponse([
+        'plan_id' => $planId,
+        'progress_percent' => $progress,
+        'status' => $status ?? ($plan['status'] ?? 'in_progress'),
     ]);
 }
 
