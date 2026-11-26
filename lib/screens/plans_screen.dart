@@ -415,6 +415,10 @@ class _PlansScreenState extends State<PlansScreen> {
     // all platforms — dart:io File does not work on web).
     final List<_PickedAttachment> pickedAttachments = [];
     bool isSubmitting = false;
+    // 2026-11-26 (per-occurrence): the exact date this report belongs
+    // to — the plan's due date when known, else today. The user can
+    // pick any week/date (weekly / 2-week plans).
+    DateTime occurrenceDate = item.dueDate ?? DateTime.now();
 
     showModalBottomSheet(
       context: context,
@@ -469,6 +473,31 @@ class _PlansScreenState extends State<PlansScreen> {
                     Text(
                       'ክፍል፦ ${item.departmentName} | የማስፈጸሚያ ጊዜ፦ ${item.effectiveExecutionTime}',
                       style: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // 2026-11-26 (per-occurrence): which exact week/date
+                    // is this report for?
+                    Row(
+                      children: [
+                        const Text('የሪፖርት ቀን፦', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
+                          onPressed: () async {
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: occurrenceDate,
+                              firstDate: DateTime(2025, 9, 11),
+                              lastDate: DateTime.now().add(const Duration(days: 365)),
+                            );
+                            if (picked != null) {
+                              setModalState(() => occurrenceDate = picked);
+                            }
+                          },
+                          icon: const Icon(Icons.calendar_today, size: 16),
+                          label: Text(formatEthiopianDate(occurrenceDate)),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 14),
 
@@ -683,6 +712,9 @@ class _PlansScreenState extends State<PlansScreen> {
                                   'challenges': notDoneDetails,
                                   'solutions_proposed': '',
                                   'status': 'submitted',
+                                  // 2026-11-26 (per-occurrence): the exact
+                                  // date this report belongs to.
+                                  'occurrence_date': formatGregorianDateYmd(occurrenceDate),
                                   // 2026-11-26: many attachments — the
                                   // server stores each in report_attachments.
                                   if (pickedAttachments.isNotEmpty)

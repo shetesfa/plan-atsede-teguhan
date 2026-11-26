@@ -383,6 +383,15 @@ class _OfficeReportsScreenState extends State<OfficeReportsScreen> {
                                     '🏛️ ${r['department_name'] ?? r['department_id']} | 👤 ${r['submitted_by'] ?? 'አባል'} | 📅 ${formatGregorianDateStringEthiopian((r['created_at'] ?? '').toString())}',
                                     style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
                                   ),
+                                  // 2026-11-26 (per-occurrence): the exact
+                                  // date this report belongs to.
+                                  if ((r['occurrence_date'] ?? '').toString().isNotEmpty) ...[
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      '🗓️ የሪፖርት ቀን፦ ${formatGregorianDateStringEthiopian((r['occurrence_date'] ?? '').toString())}',
+                                      style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                                    ),
+                                  ],
                                   const SizedBox(height: 8),
                                   Text(
                                     r['activities_completed'] ?? '',

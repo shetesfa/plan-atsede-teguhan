@@ -104,6 +104,17 @@ if ($method === 'GET') {
         $params[] = $status;
     }
 
+    // 2026-11-26 (per-occurrence reports): only the report(s) for one
+    // exact occurrence date.
+    $occurrenceDate = $_GET['occurrence_date'] ?? null;
+    if ($occurrenceDate) {
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $occurrenceDate)) {
+            jsonError('የሪፖርት ቀን ትክክል አይደለም — YYYY-MM-DD ቅርጽ ይጠቀሙ', 400);
+        }
+        $sql .= " AND r.occurrence_date = ?";
+        $params[] = $occurrenceDate;
+    }
+
     $sql .= " ORDER BY r.created_at DESC";
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
@@ -157,6 +168,18 @@ if ($method === 'POST' && $action !== 'review') {
     $status = in_array($input['status'] ?? '', ['draft', 'submitted'], true) ? $input['status'] : 'submitted';
     $syncId = $input['sync_id'] ?? ('sync_' . uniqid());
 
+    // 2026-11-26 (per-occurrence reports): the exact date this report
+    // belongs to (YYYY-MM-DD). NULL = legacy report without a date.
+    $occurrenceDate = null;
+    if (!empty($input['occurrence_date']) && is_string($input['occurrence_date'])) {
+        $occRaw = trim($input['occurrence_date']);
+        if (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $occRaw, $m) && checkdate((int)$m[2], (int)$m[3], (int)$m[1])) {
+            $occurrenceDate = $occRaw;
+        } else {
+            jsonError('የሪፖርት ቀን ትክክል አይደለም — YYYY-MM-DD ቅርጽ ይጠቀሙ', 400);
+        }
+    }
+
     if ($planId) {
         $pStmt = $pdo->prepare("SELECT department_id, main_task FROM plans WHERE id = ?");
         $pStmt->execute([$planId]);
@@ -183,11 +206,11 @@ if ($method === 'POST' && $action !== 'review') {
             INSERT INTO reports (
                 id, plan_id, department_id, submitted_by, title, activities_completed,
                 progress_percent, challenges, solutions_proposed, budget_spent, status,
-                sync_id, is_deleted
+                sync_id, occurrence_date, is_deleted
             ) VALUES (
                 ?, ?, ?, ?, ?, ?,
                 ?, ?, ?, ?, ?,
-                ?, 0
+                ?, ?, 0
             ) ON DUPLICATE KEY UPDATE
                 title = VALUES(title),
                 activities_completed = VALUES(activities_completed),
@@ -196,12 +219,13 @@ if ($method === 'POST' && $action !== 'review') {
                 solutions_proposed = VALUES(solutions_proposed),
                 budget_spent = VALUES(budget_spent),
                 status = VALUES(status),
+                occurrence_date = VALUES(occurrence_date),
                 version = version + 1
         ");
         $stmt->execute([
             $reportId, $planId, $deptId, $submittedBy, $title, $activities,
             $progress, $challenges, $solutions, $budgetSpent, $status,
-            $syncId
+            $syncId, $occurrenceDate
         ]);
 
         if ($planId) {

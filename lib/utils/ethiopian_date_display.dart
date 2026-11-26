@@ -106,6 +106,54 @@ String? dueEthiopianMonthName({String? dueDateEthiopian, DateTime? dueDate}) {
   }
   return null;
 }
+/// Gregorian (year, month, day) as a YYYY-MM-DD string for the API
+/// (`occurrence_date`).
+String formatGregorianDateYmd(DateTime date) =>
+    '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+
+/// Ethiopian (year, month 1-13, day) -> Gregorian date.
+/// Inverse of [ethiopianDateParts]: Ethiopian year N starts on 11 Sep
+/// of Gregorian year N+7 (12 Sep when N % 4 == 0).
+DateTime ethiopianToGregorianDate(int ethYear, int month, int day) {
+  final start = DateTime(ethYear + 7, 9, (ethYear % 4 == 0) ? 12 : 11);
+  return start.add(Duration(days: (month - 1) * 30 + (day - 1)));
+}
+
+/// Short Ethiopian month names, 12 months (no Pagume — the calendar
+/// shows 12 months).
+const List<String> ethiopianShortMonths12 = [
+  'መስ', 'ጥቅ', 'ህዳር', 'ታህ', 'ጥር', 'የካ',
+  'መጋ', 'ሚያ', 'ግን', 'ሰኔ', 'ሐም', 'ነሐ',
+];
+
+/// The Gregorian date of a plan's occurrence in one Ethiopian month
+/// (monthIndex 0 = መስከረም … 11 = ነሐሴ), in the current Ethiopian year.
+///
+/// Reads the plan's months map (e.g. {'ጥቅ': '29'}): the LAST day
+/// number in the value wins (ranges "10-30" -> 30, lists -> last);
+/// no number means the end of that month (day 30). A year-round plan
+/// ("ዓመቱን ሙሉ") occurs at the end of every month. Returns null when
+/// the plan has no occurrence in that month.
+DateTime? occurrenceDateForMonth({
+  required Map<String, String> months,
+  required int monthIndex,
+  String? executionTime,
+}) {
+  if (monthIndex < 0 || monthIndex > 11) return null;
+  final shortName = ethiopianShortMonths12[monthIndex];
+  final value = (months[shortName] ?? '').trim();
+  final isYearRound = (executionTime ?? '').contains('ዓመቱን ሙሉ');
+  if ((value.isEmpty || value == '-') && !isYearRound) return null;
+  var day = 30;
+  final nums = RegExp(r'(\d{1,2})')
+      .allMatches(value)
+      .map((m) => int.tryParse(m.group(1)!))
+      .whereType<int>()
+      .toList();
+  if (nums.isNotEmpty) day = nums.last.clamp(1, 30);
+  return ethiopianToGregorianDate(currentEthiopianYear(), monthIndex + 1, day);
+}
+
 /// A value that repeats its own month ("ጥቅ (ጥቅ 5)", "ግን (ግን 1)")
 /// is shortened to just the day. "ዓመቱን ሙሉ" and other bare words
 /// pass through unchanged.
