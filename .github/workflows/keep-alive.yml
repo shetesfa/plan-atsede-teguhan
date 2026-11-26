@@ -30,14 +30,14 @@ jobs:
       - name: Ping PHP API health (no DB)
         run: |
           for i in 1 2 3 4 5 6; do
-            curl -fsS --max-time 60 https://plan-atsede-teguhan.onrender.com/health.php && exit 0
+            curl -fsS --max-time 60 https://plan-atsede-php-api.onrender.com/health.php && exit 0
             sleep 45
           done
           exit 1
       - name: Ping scheduler due list (warms DB path)
         run: |
           for i in 1 2 3 4 5 6; do
-            curl -fsS --max-time 60 "https://plan-atsede-teguhan.onrender.com/scheduler.php?action=due" -H "X-Bot-Proxy-Secret: ${{ secrets.BOT_PROXY_SECRET }}" && exit 0
+            curl -fsS --max-time 60 "https://plan-atsede-php-api.onrender.com/scheduler.php?action=due" -H "X-Bot-Proxy-Secret: ${{ secrets.BOT_PROXY_SECRET }}" && exit 0
             sleep 45
           done
           exit 1
