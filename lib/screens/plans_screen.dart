@@ -171,6 +171,9 @@ class _PlansScreenState extends State<PlansScreen> {
       final fetchedPlans =
           remoteData.map((d) => PlanItem.fromDbJson(d)).toList();
       widget.onImportNewPlans(fetchedPlans);
+      // ከመስመር ውጭ ሲሆን እቅዶቹ ከዚህ ካሽ ይታያሉ — ካሹን አዘምን።
+      await OfflineSyncService.cachePlans(
+          AuthService.currentDepartment?.id ?? 'admin', remoteData);
       // C5: ለተገኙት እቅዶች የአካባቢ ማሳሰቢያ ማስያዝ።
       NotificationService().scheduleRemindersForPlans(fetchedPlans);
       return true;
