@@ -1,0 +1,16 @@
+-- Migration 10 (2026-11-26): store report attachment bytes in the database.
+--
+-- file_data: the attachment bytes themselves (LONGBLOB). Report
+-- attachments were NEVER stored on the live server: reports.php wrote
+-- each file with file_put_contents()/move_uploaded_file() into
+-- api/uploads/ and only INSERTed the DB row if that write succeeded —
+-- but on the Render container the directory does not exist and
+-- www-data cannot create it under root-owned /var/www/html (the
+-- Dockerfile never creates api/uploads and never sets ownership), so
+-- the write failed silently and the INSERT was skipped. The fix stops
+-- depending on the container filesystem entirely: reports.php now
+-- stores the bytes in file_data, and files.php serves from the blob
+-- (the disk file_path is kept only as a fallback for legacy rows).
+--
+-- TiDB-safe: one ADD COLUMN per statement; idempotent (IF NOT EXISTS).
+ALTER TABLE `report_attachments` ADD COLUMN IF NOT EXISTS `file_data` LONGBLOB NULL;

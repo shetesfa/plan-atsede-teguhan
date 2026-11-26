@@ -220,7 +220,7 @@ class _OfficeReportsScreenState extends State<OfficeReportsScreen> {
                   reportId: report['id'],
                   action: currentAction,
                   comment: commentCtrl.text.trim(),
-                  reviewerName: AuthService.currentUserProfile?['full_name'] ?? 'ዲ/ን ቴዎድሮስ (ፅ/ቤት)',
+                  reviewerName: AuthService.currentUserProfile?['full_name'] ?? 'ዲ/ን ኤፍሬም (ፅ/ቤት)',
                 );
                 if (mounted) {
                   messenger.showSnackBar(

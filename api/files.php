@@ -36,12 +36,15 @@ $filePath = null;
 $fileName = null;
 $fileType = null;
 $fileDept = null;
+// 2026-11-26: attachment bytes stored in the DB (file_data) — the
+// source of truth. Disk file_path is only a fallback for legacy rows.
+$blobData = null;
 
 $isChatAttachment = false;
 
 // 1. በሪፖርት አባሪዎች ውስጥ መፈለግ
 $stmt = $pdo->prepare("
-    SELECT a.file_name, a.file_path, a.file_type, r.department_id
+    SELECT a.file_name, a.file_path, a.file_type, a.file_data, r.department_id
     FROM report_attachments a
     JOIN reports r ON a.report_id = r.id
     WHERE a.id = ? LIMIT 1
@@ -54,6 +57,9 @@ if ($att) {
     $fileName = $att['file_name'];
     $fileType = $att['file_type'];
     $fileDept = $att['department_id'];
+    if ($att['file_data'] !== null && $att['file_data'] !== '') {
+        $blobData = $att['file_data'];
+    }
 }
 
 // 2. በይፋዊ ሰነዶች ውስጥ መፈለግ
@@ -93,6 +99,36 @@ if (!$filePath) {
 // department's report attachments, view-only like the office).
 if (!$isChatAttachment && !$auth['is_super_admin'] && empty($auth['can_view_all']) && $fileDept !== $auth['department_id'] && $fileDept !== 'all') {
     jsonError('የተከለከለ ክንውን! የሌላ ክፍልን የግል ፋይል የማውረድ ፈቃድ የለዎትም (Forbidden).', 403);
+}
+
+// 4a. ከዳታቤዝ (file_data) ማቅረብ — 2026-11-26: the DB blob is the
+// source of truth; the disk path below is only a fallback for
+// legacy rows that were stored before the blob column existed.
+if ($blobData !== null) {
+    if (function_exists('finfo_open')) {
+        $finfo = finfo_open(FILEINFO_MIME_TYPE);
+        $realMime = finfo_buffer($finfo, $blobData);
+        finfo_close($finfo);
+        if ($realMime) {
+            $fileType = $realMime;
+        }
+    }
+
+    $disposition = ($action === 'preview' && (str_starts_with((string)$fileType, 'image/') || $fileType === 'application/pdf')) ? 'inline' : 'attachment';
+    $cleanFileName = preg_replace('/[^a-zA-Z0-9_\-\.\x{1200}-\x{137F}]/u', '_', $fileName ?: 'attachment');
+
+    header("Content-Type: " . ($fileType ?: 'application/octet-stream'));
+    header("Content-Disposition: $disposition; filename=\"$cleanFileName\"");
+    header("Content-Length: " . strlen($blobData));
+    header("X-Content-Type-Options: nosniff");
+    header("Cache-Control: private, no-transform, no-store, must-revalidate");
+    header("Pragma: no-cache");
+
+    // ኦዲት ሎግ መያዝ (ያለ ቶከን እና ያለ ሚስጥራዊ መረጃ)
+    logAudit($pdo, 'download_file', 'attachments', $id, $auth['user_id'], $fileDept);
+
+    echo $blobData;
+    exit;
 }
 
 // 5. ጥብቅ Path Traversal እና Canonical Directory Boundary ጥበቃ
