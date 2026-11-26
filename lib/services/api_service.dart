@@ -329,11 +329,14 @@ class ApiService {
   }
 
   // 5. ሪፖርቶችን ማምጣት (Get Reports)
-  Future<List<Map<String, dynamic>>> getReports({String? dept, String? status, String? planId}) async {
+  // 2026-11-26 (per-occurrence): occurrenceDate filters to the report(s)
+  // of one exact occurrence date (YYYY-MM-DD).
+  Future<List<Map<String, dynamic>>> getReports({String? dept, String? status, String? planId, String? occurrenceDate}) async {
     final queryParams = <String, String>{};
     if (dept != null && dept.isNotEmpty && dept != 'all') queryParams['dept'] = dept;
     if (status != null && status.isNotEmpty && status != 'all') queryParams['status'] = status;
     if (planId != null && planId.isNotEmpty) queryParams['plan_id'] = planId;
+    if (occurrenceDate != null && occurrenceDate.isNotEmpty) queryParams['occurrence_date'] = occurrenceDate;
 
     final uri = Uri.parse('$baseUrl/reports.php').replace(queryParameters: queryParams);
     try {

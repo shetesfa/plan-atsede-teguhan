@@ -174,6 +174,18 @@ if ($method === 'POST') {
                     jsonError("የሪፖርት መለያ (id) አልተገለጸም", 400);
                 }
 
+                // 2026-11-26 (per-occurrence reports): the exact date
+                // this report belongs to (YYYY-MM-DD). An invalid or
+                // absent value stays NULL — offline data must never
+                // hard-fail the whole batch.
+                $syncOccurrenceDate = null;
+                if (!empty($payload['occurrence_date']) && is_string($payload['occurrence_date'])) {
+                    $occRaw = trim($payload['occurrence_date']);
+                    if (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $occRaw, $m) && checkdate((int)$m[2], (int)$m[3], (int)$m[1])) {
+                        $syncOccurrenceDate = $occRaw;
+                    }
+                }
+
                 $rCheck = $pdo->prepare("SELECT id, department_id, status, plan_id FROM reports WHERE id = ?");
                 $rCheck->execute([$reportId]);
                 $existingReport = $rCheck->fetch();
@@ -224,7 +236,7 @@ if ($method === 'POST') {
                         $rStmt = $pdo->prepare("
                             UPDATE reports SET
                                 title = ?, activities_completed = ?, progress_percent = ?, challenges = ?,
-                                budget_spent = ?, status = COALESCE(?, status), sync_id = ?, version = version + 1
+                                budget_spent = ?, status = COALESCE(?, status), occurrence_date = COALESCE(?, occurrence_date), sync_id = ?, version = version + 1
                             WHERE id = ?
                         ");
                         $rStmt->execute([
@@ -234,6 +246,7 @@ if ($method === 'POST') {
                             $payload['challenges'] ?? null,
                             (float)($payload['budget_spent'] ?? 0),
                             $syncStatus,
+                            $syncOccurrenceDate,
                             $syncId,
                             $reportId
                         ]);
@@ -261,10 +274,10 @@ if ($method === 'POST') {
                     $rStmt = $pdo->prepare("
                         INSERT INTO reports (
                             id, plan_id, department_id, submitted_by, title, activities_completed,
-                            progress_percent, challenges, budget_spent, status, sync_id
+                            progress_percent, challenges, budget_spent, status, sync_id, occurrence_date
                         ) VALUES (
                             ?, ?, ?, ?, ?, ?,
-                            ?, ?, ?, ?, ?
+                            ?, ?, ?, ?, ?, ?
                         )
                     ");
                     $rStmt->execute([
@@ -278,7 +291,8 @@ if ($method === 'POST') {
                         $payload['challenges'] ?? null,
                         (float)($payload['budget_spent'] ?? 0),
                         'submitted',
-                        $syncId
+                        $syncId,
+                        $syncOccurrenceDate
                     ]);
                 }
             }

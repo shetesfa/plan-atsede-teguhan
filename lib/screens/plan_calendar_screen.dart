@@ -41,6 +41,101 @@ class _PlanCalendarScreenState extends State<PlanCalendarScreen> {
   bool isSendingAlert = false;
   bool isGeneratingAudit = false;
 
+  // 2026-11-26 (per-occurrence reports): every visible report, grouped
+  // by plan, so each calendar card can show its own month's report
+  // instead of the plan's single latest comment.
+  Map<String, List<Map<String, dynamic>>> _reportsByPlan = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadReports();
+  }
+
+  /// Load all visible reports once. The server scopes the list to the
+  /// user's department (office / control see all). A failure is silent
+  /// — the card falls back to the plan's local report text.
+  Future<void> _loadReports() async {
+    try {
+      final data = await ApiService().getReports();
+      final grouped = <String, List<Map<String, dynamic>>>{};
+      for (final r in data) {
+        final planId = (r['plan_id'] ?? '').toString();
+        if (planId.isEmpty) continue;
+        grouped.putIfAbsent(planId, () => []).add(r);
+      }
+      if (mounted) setState(() => _reportsByPlan = grouped);
+    } catch (_) {}
+  }
+
+  /// The latest report of [item] whose occurrence date falls in the
+  /// currently selected Ethiopian month (of the current Ethiopian year).
+  /// Reports without an occurrence date (submitted before this feature)
+  /// are legacy — they are NOT matched to a month.
+  Map<String, dynamic>? _monthReport(PlanItem item) {
+    final list = _reportsByPlan[item.id];
+    if (list == null || list.isEmpty) return null;
+    Map<String, dynamic>? best;
+    String? bestKey;
+    for (final r in list) {
+      final raw = (r['occurrence_date'] ?? '').toString().trim();
+      if (raw.isEmpty) continue;
+      final occ = DateTime.tryParse(raw);
+      if (occ == null) continue;
+      final parts = ethiopianDateParts(occ);
+      if (parts.monthIndex != selectedMonthIndex) continue;
+      if (parts.year != currentEthiopianYear()) continue;
+      final key = '${occ.toIso8601String()}|${r['created_at'] ?? ''}';
+      if (bestKey == null || key.compareTo(bestKey) > 0) {
+        best = r;
+        bestKey = key;
+      }
+    }
+    return best;
+  }
+
+  /// One report field as trimmed text, or null when empty.
+  String? _reportField(Map<String, dynamic>? report, String key) {
+    if (report == null) return null;
+    final v = (report[key] ?? '').toString().trim();
+    return v.isEmpty ? null : v;
+  }
+
+  /// A report's occurrence date as an Ethiopian date string
+  /// ("ጥቅምት 29, 2019"), or null when the report has no date.
+  String? _ethiopianDateOfReport(Map<String, dynamic> report) {
+    final raw = (report['occurrence_date'] ?? '').toString().trim();
+    if (raw.isEmpty) return null;
+    final parsed = DateTime.tryParse(raw);
+    if (parsed == null) return null;
+    return formatEthiopianDate(parsed);
+  }
+
+  /// This plan's occurrence date in the selected month, or null when
+  /// the plan has no occurrence that month.
+  DateTime? _occurrenceDate(PlanItem item) => occurrenceDateForMonth(
+        months: item.months,
+        monthIndex: selectedMonthIndex,
+        executionTime: item.executionTime,
+      );
+
+  /// This month's occurrence is overdue only when its date has passed
+  /// and no report exists for it. A reported month is never overdue —
+  /// the plan rolls forward to the next occurrence instead of staying
+  /// stuck on "ቀን አለፍሏል".
+  bool _isOccurrenceOverdue(PlanItem item) {
+    if (item.isCompleted || item.isPostponed) return false;
+    if (_monthReport(item) != null) return false;
+    final occ = _occurrenceDate(item);
+    if (occ != null) {
+      final now = DateTime.now();
+      return occ.isBefore(DateTime(now.year, now.month, now.day));
+    }
+    // No computable date for this month: keep the previous rule
+    // (months after መስከረም count as overdue).
+    return selectedMonthIndex >= 1;
+  }
+
   List<PlanItem> get _filteredPlans {
     final currentDept = AuthService.currentDepartment;
     // 2026-11-26: the control department (can_view_all) sees all
@@ -70,9 +165,10 @@ class _PlanCalendarScreenState extends State<PlanCalendarScreen> {
 
       if (!hasPlanThisMonth && !isYearRound && !isPostponedToThisMonth) return false;
 
-      // የሁኔታ ፍተሻ
+      // የሁኔታ ፍተሻ — 2026-11-26 (per-occurrence): overdue means THIS
+      // month's occurrence date passed with no report for it.
       final isCompleted = p.isCompleted;
-      final isOverdue = !isCompleted && selectedMonthIndex >= 1 && !p.isPostponed;
+      final isOverdue = _isOccurrenceOverdue(p);
 
       if (selectedFilter == 'overdue') return isOverdue;
       if (selectedFilter == 'postponed') return p.isPostponed;
@@ -233,6 +329,10 @@ class _PlanCalendarScreenState extends State<PlanCalendarScreen> {
     final notDoneController = TextEditingController(text: item.notDoneDetails ?? item.reason);
     String? pickedImagePath = item.evidencePath;
     bool isSubmitting = false;
+    // 2026-11-26 (per-occurrence): the exact date this report belongs
+    // to — this month's occurrence when computable, else today. The
+    // user can pick any week/date (weekly / 2-week plans).
+    DateTime occurrenceDate = _occurrenceDate(item) ?? DateTime.now();
 
     showModalBottomSheet(
       context: context,
@@ -277,6 +377,31 @@ class _PlanCalendarScreenState extends State<PlanCalendarScreen> {
                     Text(
                       'ክፍል፦ ${item.departmentName} | የማስፈጸሚያ ጊዜ፦ ${item.effectiveExecutionTime}',
                       style: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // 2026-11-26 (per-occurrence): which exact week/date
+                    // is this report for?
+                    Row(
+                      children: [
+                        const Text('የሪፖርት ቀን፦', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
+                          onPressed: () async {
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: occurrenceDate,
+                              firstDate: DateTime(2025, 9, 11),
+                              lastDate: DateTime.now().add(const Duration(days: 365)),
+                            );
+                            if (picked != null) {
+                              setModalState(() => occurrenceDate = picked);
+                            }
+                          },
+                          icon: const Icon(Icons.calendar_today, size: 16),
+                          label: Text(formatEthiopianDate(occurrenceDate)),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 14),
 
@@ -409,6 +534,9 @@ class _PlanCalendarScreenState extends State<PlanCalendarScreen> {
                                   'challenges': notDoneDetails,
                                   'solutions_proposed': '',
                                   'status': 'submitted',
+                                  // 2026-11-26 (per-occurrence): the exact
+                                  // date this report belongs to.
+                                  'occurrence_date': formatGregorianDateYmd(occurrenceDate),
                                 };
 
                                 final result = await ApiService().submitReport(reportPayload);
@@ -437,6 +565,18 @@ class _PlanCalendarScreenState extends State<PlanCalendarScreen> {
                                 item.updatedAt = DateTime.now();
 
                                 widget.onUpdatePlan(item);
+
+                                // 2026-11-26 (per-occurrence): remember
+                                // this report with its date, so the card
+                                // shows it for this month right away.
+                                _reportsByPlan.putIfAbsent(item.id, () => []).insert(0, <String, dynamic>{
+                                  'id': result['data']?['id'],
+                                  'plan_id': item.id,
+                                  'activities_completed': doneDetails,
+                                  'challenges': notDoneDetails,
+                                  'occurrence_date': formatGregorianDateYmd(occurrenceDate),
+                                  'created_at': DateTime.now().toIso8601String(),
+                                });
 
                                 await TelegramService.sendPlanReportNotice(
                                   deptName: item.departmentName,
@@ -692,7 +832,10 @@ class _PlanCalendarScreenState extends State<PlanCalendarScreen> {
           IconButton(
             icon: const Icon(Icons.refresh),
             tooltip: 'አድስ',
-            onPressed: () => setState(() {}),
+            onPressed: () {
+              _loadReports();
+              setState(() {});
+            },
           ),
         ],
       ),
@@ -844,7 +987,15 @@ class _PlanCalendarScreenState extends State<PlanCalendarScreen> {
                     itemCount: filtered.length,
                     itemBuilder: (ctx, idx) {
                       final item = filtered[idx];
-                      final isOverdue = !item.isCompleted && selectedMonthIndex >= 1 && !item.isPostponed;
+                      final isOverdue = _isOccurrenceOverdue(item);
+                      // 2026-11-26 (per-occurrence): this month's own
+                      // report — not the plan's single latest comment.
+                      // Legacy/local text is the fallback when this
+                      // month has no dated report.
+                      final monthReport = _monthReport(item);
+                      final doneText = _reportField(monthReport, 'activities_completed') ?? item.reportDetails;
+                      final notDoneText = _reportField(monthReport, 'challenges') ?? item.notDoneDetails;
+                      final monthReportDate = monthReport == null ? null : _ethiopianDateOfReport(monthReport);
 
                       return Card(
                         margin: const EdgeInsets.only(bottom: 12),
@@ -957,7 +1108,7 @@ class _PlanCalendarScreenState extends State<PlanCalendarScreen> {
                                 ),
                               ],
 
-                              if (item.reportDetails != null && item.reportDetails!.isNotEmpty) ...[
+                              if (doneText != null && doneText.isNotEmpty) ...[
                                 const SizedBox(height: 4),
                                 Container(
                                   width: double.infinity,
@@ -966,11 +1117,11 @@ class _PlanCalendarScreenState extends State<PlanCalendarScreen> {
                                     color: Colors.green.shade50,
                                     borderRadius: BorderRadius.circular(4),
                                   ),
-                                  child: Text('የተከናወነ፦ ${item.reportDetails}', style: TextStyle(fontSize: 11, color: Colors.green.shade900)),
+                                  child: Text('የተከናወነ${monthReportDate != null ? ' ($monthReportDate)' : ''}፦ $doneText', style: TextStyle(fontSize: 11, color: Colors.green.shade900)),
                                 ),
                               ],
 
-                              if (item.notDoneDetails != null && item.notDoneDetails!.isNotEmpty) ...[
+                              if (notDoneText != null && notDoneText.isNotEmpty) ...[
                                 const SizedBox(height: 4),
                                 Container(
                                   width: double.infinity,
@@ -979,7 +1130,7 @@ class _PlanCalendarScreenState extends State<PlanCalendarScreen> {
                                     color: Colors.red.shade50,
                                     borderRadius: BorderRadius.circular(4),
                                   ),
-                                  child: Text('ያልተከናወነ/ምክንያት፦ ${item.notDoneDetails}', style: TextStyle(fontSize: 11, color: Colors.red.shade900)),
+                                  child: Text('ያልተከናወነ/ምክንያት፦ $notDoneText', style: TextStyle(fontSize: 11, color: Colors.red.shade900)),
                                 ),
                               ],
 
