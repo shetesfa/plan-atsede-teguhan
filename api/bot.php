@@ -21,6 +21,8 @@
 //   recent_for    {chat_id}                  — plans due in the next 7 days (+overdue)
 //   plans_summary {chat_id}                  — LIVE counts, dept-scoped (linked only)
 //   plans_list    {department_id?, chat_id}   — LIVE plan list, dept-scoped (linked only)
+//   plans_count   {}                         — LIVE total + per-dept counts (server-side only, no chat_id)
+//   plans_all     {department_id?}           — LIVE full plan list, all depts (server-side only, no chat_id)
 //   departments   {}                         — live department list (id, name)
 //   plan_progress {plan_id, progress, chat_id} — update progress from Telegram
 //   reset_request {username}                 — create a reset code (bot sends it)
@@ -329,6 +331,41 @@ if ($action === 'plans_list') {
     if (empty($user['is_super_admin']) && empty($user['can_view_all'])) {
         $dept = $user['department_id'];
     }
+    $plans = botFetchLivePlans($pdo, ($dept === '' ? null : $dept));
+    $counts = botPlanCounts($plans, $todayStr, $weekStr);
+    jsonResponse([
+        'plans' => $plans,
+        'total' => $counts['total'],
+        'overdue_count' => $counts['overdue_count'],
+    ]);
+}
+
+// LIVE እቅድ ቆጠራ — ለሰርቨር ብቻ (server-side only, no chat_id)
+// 2026-11-26 (live count fix): the bot service's own health endpoint
+// (root `/` plans_count) and /api/plans need the LIVE count/list, but
+// plans_list is link-gated since PR #40 and 404s without a chat_id.
+// These two actions are proxy-secret only — the same trust boundary as
+// every other bot.php action — and are never called from any Telegram
+// handler, so no chat_id is required or accepted.
+if ($action === 'plans_count') {
+    $plans = botFetchLivePlans($pdo, null);
+    $byDept = [];
+    foreach ($plans as $p) {
+        $name = $p['department_name'];
+        $byDept[$name] = ($byDept[$name] ?? 0) + 1;
+    }
+    $counts = botPlanCounts($plans, $todayStr, $weekStr);
+    jsonResponse([
+        'total' => $counts['total'],
+        'overdue_count' => $counts['overdue_count'],
+        'due_soon_count' => $counts['due_soon_count'],
+        'by_department' => $byDept,
+    ]);
+}
+
+// LIVE እቅድ ዝርዝር — ለሰርቨር ብቻ (server-side only, all departments)
+if ($action === 'plans_all') {
+    $dept = $input['department_id'] ?? null;
     $plans = botFetchLivePlans($pdo, ($dept === '' ? null : $dept));
     $counts = botPlanCounts($plans, $todayStr, $weekStr);
     jsonResponse([

@@ -175,10 +175,20 @@ def get_plans_from_database(dept=None):
 def home():
     # M11: the root endpoint is a public health check. It must NOT expose
     # anything derived from a secret -- no token prefix, no chat ID.
+    # 2026-11-26 (live count fix): plans_count comes from the server-side
+    # plans_count action (live DB). plans_list is link-gated since PR #40
+    # and 404s without a chat_id, so counting the static fallback would
+    # report the stale 137 plans. The static file is only a last resort
+    # when the PHP API itself is unreachable.
+    count_data = bot_api("plans_count", {})
+    if count_data and isinstance(count_data.get("total"), int):
+        plans_count = count_data["total"]
+    else:
+        plans_count = len(get_plans_from_database())
     return jsonify({
         "status": "online",
         "service": "Atsede Teguhan Telegram Bot & API Server",
-        "plans_count": len(get_plans_from_database()),
+        "plans_count": plans_count,
         "bot_active": bool(BOT_TOKEN),
     })
 
@@ -195,7 +205,18 @@ def api_get_plans():
     if auth_error is not None:
         return auth_error
     dept = request.args.get("dept")
-    plans = get_plans_from_database(dept)
+    # 2026-11-26 (live count fix): read the live list via the
+    # proxy-secret-only plans_all action. plans_list is link-gated since
+    # PR #40 and 404s without a chat_id; the static file is only a last
+    # resort when the PHP API itself is unreachable.
+    payload = {}
+    if dept:
+        payload["department_id"] = dept
+    data = bot_api("plans_all", payload)
+    if data and isinstance(data.get("plans"), list):
+        plans = data["plans"]
+    else:
+        plans = get_plans_from_database(dept)
     return jsonify({"status": "success", "count": len(plans), "data": plans})
 
 # ==============================================================
