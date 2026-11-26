@@ -68,6 +68,10 @@ class AuthService {
   static const String _prefDeptKey = 'atsede_current_dept_id';
   static const String _prefProfileKey = 'atsede_current_user_profile';
   static const String _prefSessionExpiryKey = 'atsede_session_expiry';
+  // 2026-11-26 (startup fix): pinned cache user id — must match
+  // OfflineSyncService._prefCacheUserIdKey. Cleared on logout so the
+  // next user starts with a clean cache key.
+  static const String _prefCacheUserIdKey = 'atsede_cache_user_id';
 
   /// App ሲከፈት ቀድሞ የተረጋገጠ ክፍለ-ጊዜ (Verified Session) መኖሩን እና ጊዜው እንዳላለፈ ያረጋግጣል
   static Future<bool> initSession() async {
@@ -173,6 +177,7 @@ class AuthService {
       await prefs.remove(_prefDeptKey);
       await prefs.remove(_prefProfileKey);
       await prefs.remove(_prefSessionExpiryKey);
+      await prefs.remove(_prefCacheUserIdKey);
       await prefs.remove('atsede_chat_cache');
       if (oldDeptId != null) {
         await prefs.remove('atsede_cached_plans_$oldDeptId');
