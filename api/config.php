@@ -454,6 +454,16 @@ function checkRateLimit(PDO $pdo, string $key, int $maxAttempts = 5, int $decayM
                 $rem = ceil((strtotime($record['locked_until']) - time()) / 60);
                 jsonError("ተደጋጋሚ የተሳሳተ ሙከራ ተደርጓል! እባክዎ ከ $rem ደቂቃ በኋላ ደግመው ይሞክሩ (Too Many Requests).", 429);
             }
+            if ($record['locked_until'] && strtotime($record['locked_until']) <= time()) {
+                // 2026-11-26: the lock has EXPIRED — clear the stale record so
+                // this attempt can proceed to password verification. Without
+                // this, the attempts >= maxAttempts branch below would re-arm
+                // the lock on every attempt (checkRateLimit runs before the
+                // password is checked, so a successful login could never clear
+                // it) and the lock would last forever instead of 15 minutes.
+                $pdo->prepare("DELETE FROM login_attempts WHERE attempt_key = ?")->execute([$key]);
+                return;
+            }
             if ($record['attempts'] >= $maxAttempts) {
                 $lockedUntil = date('Y-m-d H:i:s', time() + ($decayMinutes * 60));
                 $pdo->prepare("UPDATE login_attempts SET locked_until = ? WHERE attempt_key = ?")->execute([$lockedUntil, $key]);
