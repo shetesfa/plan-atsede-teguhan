@@ -9,7 +9,7 @@ jobs:
     steps:
       - name: Run scheduler
         run: |
-          for i in 1 2 3; do
+          for i in 1 2 3 4 5 6; do
             code=$(curl -s --max-time 120 -o /tmp/sched.json -w "%{http_code}" -X POST -H "X-Bot-Proxy-Secret: ${{ secrets.BOT_PROXY_SECRET }}" -H "Content-Type: application/json" -d '{}' https://plan-atsede-teguhan-new.onrender.com/api/scheduler/run)
             echo "attempt $i: HTTP $code"
             cat /tmp/sched.json; echo
