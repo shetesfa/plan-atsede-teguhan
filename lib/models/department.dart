@@ -63,13 +63,6 @@ class Department {
       color: Color(0xFFD81B60),
     ),
     Department(
-      id: 'members',
-      name: 'አባላት አስተዳደር ክፍል',
-      shortName: 'አባላት',
-      icon: Icons.groups,
-      color: Color(0xFF3949AB),
-    ),
-    Department(
       id: 'audit',
       name: 'ቁጥጥር ክፍል',
       shortName: 'ቁጥጥር',

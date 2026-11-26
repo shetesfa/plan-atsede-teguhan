@@ -248,14 +248,20 @@ if ($method === 'POST' && $action !== 'review') {
                 }
 
                 $safeName = 'att_' . hash('sha256', uniqid() . microtime()) . '.' . $ext;
-                $targetPath = $uploadDir . $safeName;
-                if (move_uploaded_file($file['tmp_name'], $targetPath)) {
-                    $attId = 'att_' . uniqid();
-                    $relPath = 'api/uploads/' . $safeName;
-                    $attStmt = $pdo->prepare("INSERT INTO report_attachments (id, report_id, file_name, file_path, file_type, file_size) VALUES (?, ?, ?, ?, ?, ?)");
-                    $attStmt->execute([$attId, $reportId, htmlspecialchars($file['name'], ENT_QUOTES, 'UTF-8'), $relPath, $mime, $file['size']]);
-                    $attachedBytesTotal += (int)$file['size'];
+                $relPath = 'api/uploads/' . $safeName;
+                // 2026-11-26: bytes are read from the upload and stored in
+                // the DB (file_data) — never gated on a disk write. On the
+                // Render container api/uploads is not writable, so the old
+                // move_uploaded_file() gate silently dropped every file.
+                $fileData = file_get_contents($file['tmp_name']);
+                if ($fileData === false) {
+                    $pdo->rollBack();
+                    jsonError('የፋይሉን ይዘት ማንበብ አልተቻለም', 500);
                 }
+                $attId = 'att_' . uniqid();
+                $attStmt = $pdo->prepare("INSERT INTO report_attachments (id, report_id, file_name, file_path, file_type, file_size, file_data) VALUES (?, ?, ?, ?, ?, ?, ?)");
+                $attStmt->execute([$attId, $reportId, htmlspecialchars($file['name'], ENT_QUOTES, 'UTF-8'), $relPath, $mime, $file['size'], $fileData]);
+                $attachedBytesTotal += (int)$file['size'];
             }
         }
 
@@ -291,14 +297,13 @@ if ($method === 'POST' && $action !== 'review') {
                 }
 
                 $safeName = 'att_' . hash('sha256', uniqid() . microtime()) . '.' . $ext;
-                $targetPath = $uploadDir . $safeName;
-                if (file_put_contents($targetPath, $fileData)) {
-                    $attId = 'att_' . uniqid();
-                    $relPath = 'api/uploads/' . $safeName;
-                    $attStmt = $pdo->prepare("INSERT INTO report_attachments (id, report_id, file_name, file_path, file_type, file_size) VALUES (?, ?, ?, ?, ?, ?)");
-                    $attStmt->execute([$attId, $reportId, htmlspecialchars($origName, ENT_QUOTES, 'UTF-8'), $relPath, $mime, strlen($fileData)]);
-                    $attachedBytesTotal += strlen($fileData);
-                }
+                $relPath = 'api/uploads/' . $safeName;
+                // 2026-11-26: store the bytes in the DB (file_data) — never
+                // gated on a disk write (see the multipart path above).
+                $attId = 'att_' . uniqid();
+                $attStmt = $pdo->prepare("INSERT INTO report_attachments (id, report_id, file_name, file_path, file_type, file_size, file_data) VALUES (?, ?, ?, ?, ?, ?, ?)");
+                $attStmt->execute([$attId, $reportId, htmlspecialchars($origName, ENT_QUOTES, 'UTF-8'), $relPath, $mime, strlen($fileData), $fileData]);
+                $attachedBytesTotal += strlen($fileData);
             }
         }
 
@@ -351,14 +356,13 @@ if ($method === 'POST' && $action !== 'review') {
                 }
 
                 $safeName = 'att_' . hash('sha256', uniqid() . microtime()) . '.' . $ext;
-                $targetPath = $uploadDir . $safeName;
-                if (file_put_contents($targetPath, $fileData)) {
-                    $attId = 'att_' . uniqid();
-                    $relPath = 'api/uploads/' . $safeName;
-                    $attStmt = $pdo->prepare("INSERT INTO report_attachments (id, report_id, file_name, file_path, file_type, file_size) VALUES (?, ?, ?, ?, ?, ?)");
-                    $attStmt->execute([$attId, $reportId, htmlspecialchars($origName, ENT_QUOTES, 'UTF-8'), $relPath, $mime, $fileSize]);
-                    $attachedBytesTotal += $fileSize;
-                }
+                $relPath = 'api/uploads/' . $safeName;
+                // 2026-11-26: store the bytes in the DB (file_data) — never
+                // gated on a disk write (see the multipart path above).
+                $attId = 'att_' . uniqid();
+                $attStmt = $pdo->prepare("INSERT INTO report_attachments (id, report_id, file_name, file_path, file_type, file_size, file_data) VALUES (?, ?, ?, ?, ?, ?, ?)");
+                $attStmt->execute([$attId, $reportId, htmlspecialchars($origName, ENT_QUOTES, 'UTF-8'), $relPath, $mime, $fileSize, $fileData]);
+                $attachedBytesTotal += $fileSize;
             }
         }
 
