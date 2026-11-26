@@ -5,6 +5,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/telegram_connect_dialog.dart';
 
 class DocumentEditorScreen extends StatefulWidget {
   const DocumentEditorScreen({super.key});
