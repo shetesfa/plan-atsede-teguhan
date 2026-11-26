@@ -200,19 +200,31 @@ class ApiService {
   }
 
   /// የአሁኑን የተጠቃሚ መረጃ ከአገልጋዩ ማረጋገጥ (Get Live Current User Profile)
+  /// አገልጋዩ ተጠቃሚው እንደሌለ ሲመልስ (401/404 — token revoked / user
+  /// deleted) null ይመልሳል፤ network/timeout ስህተት ሲኖር ApiException
+  /// ይጥላል — የኔትወርክ ብልሽት ብቻ ተጠቃሚውን ከስርዓቱ ማስወጣት የለበትም
+  /// (2026-11-26 startup fix — _validateLiveSessionAsync used to log
+  /// the user out whenever this returned null for any reason).
   Future<Map<String, dynamic>?> getCurrentUser() async {
+    final uri = Uri.parse('$baseUrl/auth.php?action=me');
+    http.Response res;
     try {
-      final uri = Uri.parse('$baseUrl/auth.php?action=me');
-      final res = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 30));
-      if (res.statusCode == 200) {
+      res = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 30));
+    } catch (e) {
+      throw ApiException('የአገልጋይ ግንኙነት አልተሳካም፦ $e');
+    }
+    if (res.statusCode == 200) {
+      try {
         final data = jsonDecode(res.body);
         if (data['user'] != null && data['user'] is Map) {
           final user = Map<String, dynamic>.from(data['user']);
           currentUser = user;
           return user;
         }
+      } catch (_) {
+        return null;
       }
-    } catch (_) {}
+    }
     return null;
   }
 
@@ -225,6 +237,10 @@ class ApiService {
   String? lastError;
 
   /// እቅዶችን ከአገልጋዩ ማምጣት — network/HTTP/JSON ስህተት ሲኖር ApiException ይጥላል።
+  /// Render free server ሲነቃ (cold start) የመጀመሪያው ጥሪ ሊጠፋ ይችላል፤
+  /// network/timeout ወይም 502/503/504 ስህተት ሲኖር እስከ 3 ጊዜ በራስ-ሰር
+  /// ይሞክራል (2026-11-26 startup fix) — app ሲከፈት አንድ የጠፋ ጥሪ
+  /// "server አልተገኘም" ማለት የለበትም። 401/4xx አይሞከርም።
   Future<List<Map<String, dynamic>>> fetchPlans({String? dept, String? status, String? search}) async {
     final queryParams = <String, String>{};
     if (dept != null && dept.isNotEmpty && dept != 'all') queryParams['dept'] = dept;
@@ -232,32 +248,53 @@ class ApiService {
     if (search != null && search.isNotEmpty) queryParams['search'] = search;
 
     final uri = Uri.parse('$baseUrl/plans.php').replace(queryParameters: queryParams);
-    http.Response res;
-    try {
-      res = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 30));
-    } catch (e) {
-      lastError = 'የአገልጋይ ግንኙነት አልተሳካም፦ $e';
-      debugPrint('fetchPlans network error: $e');
-      throw ApiException(lastError!);
-    }
-    if (res.statusCode != 200) {
-      lastError = 'አገልጋዩ ስህተት መልሷል (HTTP ${res.statusCode})';
-      throw ApiException(lastError!, res.statusCode);
-    }
-    try {
-      final data = jsonDecode(res.body);
-      if (data['status'] == 'success' && data['data'] is List) {
-        lastError = null;
-        return List<Map<String, dynamic>>.from(data['data']);
+    const maxAttempts = 3;
+    const backoff = [Duration.zero, Duration(seconds: 2), Duration(seconds: 5)];
+    Object? lastFailure;
+    int? lastStatus;
+    for (var attempt = 0; attempt < maxAttempts; attempt++) {
+      if (attempt > 0) {
+        await Future.delayed(backoff[attempt]);
       }
-      lastError = data['message']?.toString() ?? 'አገልጋዩ ያልተጠበቀ መልስ ሰጥቷል';
-      throw ApiException(lastError!, res.statusCode);
-    } on ApiException {
-      rethrow;
-    } catch (e) {
-      lastError = 'የአገልጋዩን መልስ ማንበብ አልተቻለም፦ $e';
-      throw ApiException(lastError!);
+      http.Response res;
+      try {
+        res = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 30));
+      } catch (e) {
+        // Network/timeout — the server may still be waking; retry.
+        lastFailure = e;
+        lastStatus = null;
+        debugPrint('fetchPlans network error (attempt ${attempt + 1}/$maxAttempts): $e');
+        continue;
+      }
+      if (res.statusCode == 502 || res.statusCode == 503 || res.statusCode == 504) {
+        // Render proxy while the service wakes — retry.
+        lastFailure = 'አገልጋዩ ስህተት መልሷል (HTTP ${res.statusCode})';
+        lastStatus = res.statusCode;
+        debugPrint('fetchPlans HTTP ${res.statusCode} (attempt ${attempt + 1}/$maxAttempts) — retrying');
+        continue;
+      }
+      if (res.statusCode != 200) {
+        // Auth / client errors (401/403/4xx) — retrying cannot help.
+        lastError = 'አገልጋዩ ስህተት መልሷል (HTTP ${res.statusCode})';
+        throw ApiException(lastError!, res.statusCode);
+      }
+      try {
+        final data = jsonDecode(res.body);
+        if (data['status'] == 'success' && data['data'] is List) {
+          lastError = null;
+          return List<Map<String, dynamic>>.from(data['data']);
+        }
+        lastError = data['message']?.toString() ?? 'አገልጋዩ ያልተጠበቀ መልስ ሰጥቷል';
+        throw ApiException(lastError!, res.statusCode);
+      } on ApiException {
+        rethrow;
+      } catch (e) {
+        lastError = 'የአገልጋዩን መልስ ማንበብ አልተቻለም፦ $e';
+        throw ApiException(lastError!);
+      }
     }
+    lastError = lastFailure is String ? lastFailure : 'የአገልጋይ ግንኙነት አልተሳካም፦ $lastFailure';
+    throw ApiException(lastError!, lastStatus);
   }
 
   /// ለኋላ ተኳሃኝነት፦ ስህተት ሲኖር [] ይመልሳል እና ስህተቱን በ [lastError] ላይ ይመዘግባል።

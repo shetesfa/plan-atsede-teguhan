@@ -11,9 +11,34 @@ class OfflineSyncService {
   static const String _prefReportsCachePrefix = 'atsede_cached_reports_';
   static const String _prefLastSyncTimeKey = 'atsede_last_sync_timestamp';
 
+  // 2026-11-26 (startup fix): the cache user id is PINNED in its own pref
+  // and never overwritten by the background /me profile refresh, so the
+  // cache key cannot drift between the saved profile and the live user
+  // object (or fall back to 'common' when the profile is momentarily
+  // null). Must match AuthService._prefCacheUserIdKey.
+  static const String _prefCacheUserIdKey = 'atsede_cache_user_id';
+
+  /// Resolve the user id for cache keys: explicit > pinned pref > live
+  /// profile id > 'common'. The pinned id is written (never 'common')
+  /// the first time an authenticated profile id is available.
+  static Future<String> _resolveCacheUserId([String? explicitUserId]) async {
+    if (explicitUserId != null && explicitUserId.isNotEmpty) return explicitUserId;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final pinned = prefs.getString(_prefCacheUserIdKey);
+      if (pinned != null && pinned.isNotEmpty) return pinned;
+      final profileId = AuthService.currentUserProfile?['id']?.toString();
+      if (profileId != null && profileId.isNotEmpty) {
+        await prefs.setString(_prefCacheUserIdKey, profileId);
+        return profileId;
+      }
+    } catch (_) {}
+    return 'common';
+  }
+
   /// የተጠቃሚን እና የክፍልን መለያ በማጣመር ደህንነቱ የተጠበቀ የካሽ ቁልፍ ያዘጋጃል (User & Dept Scoped Cache Key)
-  static String _buildCacheKey(String prefix, String deptId, [String? explicitUserId]) {
-    final userId = explicitUserId ?? AuthService.currentUserProfile?['id']?.toString() ?? 'common';
+  static Future<String> _buildCacheKey(String prefix, String deptId, [String? explicitUserId]) async {
+    final userId = await _resolveCacheUserId(explicitUserId);
     return '$prefix${userId}_$deptId';
   }
 
@@ -21,7 +46,7 @@ class OfflineSyncService {
   static Future<void> cachePlans(String deptId, List<Map<String, dynamic>> plans, {String? userId}) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = _buildCacheKey(_prefPlansCachePrefix, deptId, userId);
+      final key = await _buildCacheKey(_prefPlansCachePrefix, deptId, userId);
       await prefs.setString(key, jsonEncode(plans));
       await prefs.setString(_prefLastSyncTimeKey, DateTime.now().toIso8601String());
     } catch (e) {
@@ -33,16 +58,24 @@ class OfflineSyncService {
   static Future<List<Map<String, dynamic>>> getCachedPlans(String deptId, {String? userId}) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final key = _buildCacheKey(_prefPlansCachePrefix, deptId, userId);
-      var raw = prefs.getString(key);
-      // ለቀድሞ ስሪት ተኳሃኝነት (Fallback to legacy key if user-scoped key is empty)
-      if (raw == null || raw.isEmpty) {
-        raw = prefs.getString('$_prefPlansCachePrefix$deptId');
-      }
-      if (raw != null && raw.isNotEmpty) {
-        final decoded = jsonDecode(raw);
-        if (decoded is List) {
-          return List<Map<String, dynamic>>.from(decoded);
+      final key = await _buildCacheKey(_prefPlansCachePrefix, deptId, userId);
+      // 2026-11-26 (startup fix): try every key shape a cache may have
+      // been written under — pinned/user-scoped, 'common' (the profile
+      // was momentarily null when it was written), then the pre-user-
+      // scoping legacy key — so a cache written after login is always
+      // found again on the next cold start.
+      final candidates = <String>[
+        key,
+        '${_prefPlansCachePrefix}common_$deptId',
+        '$_prefPlansCachePrefix$deptId',
+      ];
+      for (final candidate in candidates) {
+        final raw = prefs.getString(candidate);
+        if (raw != null && raw.isNotEmpty) {
+          final decoded = jsonDecode(raw);
+          if (decoded is List) {
+            return List<Map<String, dynamic>>.from(decoded);
+          }
         }
       }
     } catch (e) {
@@ -186,13 +219,16 @@ class OfflineSyncService {
   static Future<void> purgeUserData(String deptId, {String? userId, bool forcePurgeQueue = false}) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final keyPlans = _buildCacheKey(_prefPlansCachePrefix, deptId, userId);
-      final keyReports = _buildCacheKey(_prefReportsCachePrefix, deptId, userId);
+      final keyPlans = await _buildCacheKey(_prefPlansCachePrefix, deptId, userId);
+      final keyReports = await _buildCacheKey(_prefReportsCachePrefix, deptId, userId);
 
       await prefs.remove(keyPlans);
       await prefs.remove(keyReports);
+      await prefs.remove('${_prefPlansCachePrefix}common_$deptId');
+      await prefs.remove('${_prefReportsCachePrefix}common_$deptId');
       await prefs.remove('$_prefPlansCachePrefix$deptId');
       await prefs.remove('$_prefReportsCachePrefix$deptId');
+      await prefs.remove(_prefCacheUserIdKey);
 
       // ያልተመሳከሩ ወረፋዎች ካሉ ያለ ተጠቃሚው ግልጽ ፈቃድ (forcePurgeQueue) በጭራሽ አይጠፉም!
       if (forcePurgeQueue) {

@@ -46,18 +46,41 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     _loadInitialPlans();
   }
 
+  // 2026-11-26 (startup fix): OFFLINE-FIRST — show the cached plans
+  // immediately, then refresh from the server in the background (fetchPlans
+  // retries itself while the Render server wakes). The full-screen
+  // "server not found" error appears ONLY when there is truly no cache
+  // AND the server is unreachable after retries.
   Future<void> _loadInitialPlans() async {
-    setState(() {
-      isLoading = true;
-      _serverError = null;
-    });
+    if (mounted) {
+      setState(() {
+        isLoading = true;
+        _serverError = null;
+      });
+    }
     final deptId = AuthService.currentDepartment?.id ?? 'admin';
+    // 1. Cached plans first — the app opens instantly, even offline.
+    var cached = <Map<String, dynamic>>[];
     try {
-      // Plans live on the ONLINE server; every successful fetch also
-      // refreshes the local cache, so the app can work offline.
+      cached = await OfflineSyncService.getCachedPlans(deptId);
+    } catch (_) {}
+    if (cached.isNotEmpty && mounted) {
+      final lastSync = await OfflineSyncService.getLastSyncTime();
+      setState(() {
+        plans = cached.map((d) => PlanItem.fromDbJson(d)).toList();
+        isLoading = false;
+        _isOffline = true;
+        _lastSyncText =
+            lastSync != null ? formatEthiopianDate(lastSync) : null;
+        _serverError = null;
+      });
+    }
+    // 2. Server refresh in the background (retries inside fetchPlans).
+    try {
       final remoteData = await ApiService().fetchPlans();
       final dbPlans = remoteData.map((d) => PlanItem.fromDbJson(d)).toList();
       await OfflineSyncService.cachePlans(deptId, remoteData);
+      if (!mounted) return;
       setState(() {
         plans = dbPlans;
         isLoading = false;
@@ -65,9 +88,30 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         _lastSyncText = null;
       });
     } on ApiException catch (e) {
-      await _loadFromCacheOrError(deptId, e.message);
+      // Server still unreachable after retries — keep the cached plans
+      // on screen (offline banner); only show the error when no cache
+      // exists at all.
+      if (cached.isNotEmpty) {
+        if (mounted) {
+          setState(() {
+            _isOffline = true;
+            isLoading = false;
+          });
+        }
+      } else {
+        await _loadFromCacheOrError(deptId, e.message);
+      }
     } catch (e) {
-      await _loadFromCacheOrError(deptId, e.toString());
+      if (cached.isNotEmpty) {
+        if (mounted) {
+          setState(() {
+            _isOffline = true;
+            isLoading = false;
+          });
+        }
+      } else {
+        await _loadFromCacheOrError(deptId, e.toString());
+      }
     }
     await _loadUnplannedActivities();
   }
@@ -107,6 +151,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   /// (e.g. first launch with no internet).
   Future<void> _loadFromCacheOrError(String deptId, String message) async {
     final cached = await OfflineSyncService.getCachedPlans(deptId);
+    if (!mounted) return;
     if (cached.isNotEmpty) {
       final lastSync = await OfflineSyncService.getLastSyncTime();
       final dbPlans = cached.map((d) => PlanItem.fromDbJson(d)).toList();
