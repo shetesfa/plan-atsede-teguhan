@@ -107,8 +107,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           Expanded(
             child: Text(
               _lastSyncText != null
-                  ? 'ከመስመር ውጭ — የተቀመጠ መረጃ እያሳየ ነው (መጨረሻ ማመሳከሪያ፦ $_lastSyncText)'
-                  : 'ከመስመር ውጭ — የተቀመጠ መረጃ እያሳየ ነው',
+                  ? 'offline — የተቀመጠ መረጃ እያሳየ ነው (መጨረሻ ማመሳከሪያ፦ $_lastSyncText)'
+                  : 'offline — የተቀመጠ መረጃ እያሳየ ነው',
               style: const TextStyle(
                   color: Colors.white,
                   fontSize: 12,
