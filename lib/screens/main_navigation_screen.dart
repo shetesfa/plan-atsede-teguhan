@@ -3,7 +3,9 @@ import '../models/plan_item.dart';
 import '../models/unplanned_activity.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import '../services/offline_sync_service.dart';
 import '../theme/app_theme.dart';
+import '../utils/ethiopian_date_display.dart';
 import 'dashboard_screen.dart';
 import 'plans_screen.dart';
 import 'letter_generator_screen.dart';
@@ -30,6 +32,9 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   bool isLoading = true;
   String? _serverError;
   String? selectedDeptForPlans;
+  // ከመስመር ውጭ ሲሆን እቅዶቹ ከካሽ ይታያሉ — ማሳያው ይህን ያመለክታል።
+  bool _isOffline = false;
+  String? _lastSyncText;
 
   @override
   void initState() {
@@ -42,32 +47,85 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
       isLoading = true;
       _serverError = null;
     });
+    final deptId = AuthService.currentDepartment?.id ?? 'admin';
     try {
-      // Plans live on the ONLINE server only (2026-11-25).
-      // fetchPlans() throws when the server cannot be reached, so a
-      // failure is visible instead of silently showing stale local data.
+      // Plans live on the ONLINE server; every successful fetch also
+      // refreshes the local cache, so the app can work offline.
       final remoteData = await ApiService().fetchPlans();
       final dbPlans = remoteData.map((d) => PlanItem.fromDbJson(d)).toList();
+      await OfflineSyncService.cachePlans(deptId, remoteData);
       setState(() {
         plans = dbPlans;
         isLoading = false;
+        _isOffline = false;
+        _lastSyncText = null;
       });
     } on ApiException catch (e) {
-      // Server unreachable: show the error + retry. NEVER fall back
-      // to the bundled Excel/JSON — the app must not show plans
-      // that are not on the server.
-      setState(() {
-        plans = [];
-        _serverError = e.message;
-        isLoading = false;
-      });
+      await _loadFromCacheOrError(deptId, e.message);
     } catch (e) {
+      await _loadFromCacheOrError(deptId, e.toString());
+    }
+  }
+
+  /// Server unreachable: show the last synced plans (offline) when any
+  /// are cached; only show the error screen when nothing is cached yet
+  /// (e.g. first launch with no internet).
+  Future<void> _loadFromCacheOrError(String deptId, String message) async {
+    final cached = await OfflineSyncService.getCachedPlans(deptId);
+    if (cached.isNotEmpty) {
+      final lastSync = await OfflineSyncService.getLastSyncTime();
+      final dbPlans = cached.map((d) => PlanItem.fromDbJson(d)).toList();
+      setState(() {
+        plans = dbPlans;
+        isLoading = false;
+        _isOffline = true;
+        _lastSyncText =
+            lastSync != null ? formatEthiopianDate(lastSync) : null;
+        _serverError = null;
+      });
+    } else {
       setState(() {
         plans = [];
-        _serverError = e.toString();
+        _serverError = message;
         isLoading = false;
+        _isOffline = false;
       });
     }
+  }
+
+  /// ከመስመር ውጭ ሲሆን ከገጹ በላይ የሚታይ ማሳያ — የተቀመጠ መረጃ
+  /// እያሳየ መሆኑን እና መቼ እንደተመሳከረ ያሳያል።
+  Widget _buildOfflineBanner() {
+    return Container(
+      width: double.infinity,
+      color: Colors.amber.shade700,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      child: Row(
+        children: [
+          const Icon(Icons.cloud_off, color: Colors.white, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _lastSyncText != null
+                  ? 'ከመስመር ውጭ — የተቀመጠ መረጃ እያሳየ ነው (መጨረሻ ማመሳከሪያ፦ $_lastSyncText)'
+                  : 'ከመስመር ውጭ — የተቀመጠ መረጃ እያሳየ ነው',
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold),
+            ),
+          ),
+          TextButton(
+            onPressed: _loadInitialPlans,
+            child: const Text('እንደገና ሞክር',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
   }
 
   void _onSelectDepartmentFromDashboard(String departmentId) {
@@ -159,7 +217,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  'እቅዶች በሰርቨሩ ላይ ብቻ ናቸው — እባክዎ ኢንተርኔትዎን ይፈትሹ እና እንደገና ይሞክሩ።',
+                  'ኢንተርኔት አልተገኘም — እቅዶች ገና በአካባቢው አልተቀመጡም። እባክዎ ኢንተርኔትዎን ይፈትሹ እና እንደገና ይሞክሩ።',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 13),
                 ),
@@ -242,7 +300,12 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     ];
 
     return Scaffold(
-      body: pages[_currentIndex],
+      body: Column(
+        children: [
+          if (_isOffline) _buildOfflineBanner(),
+          Expanded(child: pages[_currentIndex]),
+        ],
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
         onDestinationSelected: (idx) {

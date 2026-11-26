@@ -170,6 +170,19 @@ class OfflineSyncService {
   }
 
   /// 6. ሎግአውት ሲደረግ የአካባቢ ካሽን ማጽዳት (ያልተመሳከሩ ወረፋዎችን ሳያጠፉ!)
+
+  /// የመጨረሻው የተሳካ ማመሳከሪያ ሰዓት — ለ"ከመስመር ውጭ" ማሳያው ያለው
+  /// የተቀመጠ መረጃ ከመቼ ጀምሮ እንደሆነ ለማሳየት።
+  static Future<DateTime?> getLastSyncTime() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_prefLastSyncTimeKey);
+      if (raw != null && raw.isNotEmpty) return DateTime.tryParse(raw);
+    } catch (e) {
+      debugPrint('getLastSyncTime error: $e');
+    }
+    return null;
+  }
   static Future<void> purgeUserData(String deptId, {String? userId, bool forcePurgeQueue = false}) async {
     try {
       final prefs = await SharedPreferences.getInstance();
