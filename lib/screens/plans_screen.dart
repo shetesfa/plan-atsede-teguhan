@@ -567,14 +567,12 @@ class _PlansScreenState extends State<PlansScreen> {
                             final picked = await FilePicker.pickFiles(
                               type: FileType.custom,
                               allowedExtensions: ['jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx', 'xls', 'xlsx'],
-                              allowMultiple: true,
-                              withData: true,
                             );
-                            if (picked.files.isEmpty) return;
+                            if (picked.isEmpty) return;
                             final List<_PickedAttachment> added = [];
                             final List<String> skipped = [];
                             int totalBytes = pickedAttachments.fold<int>(0, (s, a) => s + a.bytes.length);
-                            for (final f in picked.files) {
+                            for (final f in picked) {
                               final bytes = f.bytes ?? await f.xFile.readAsBytes();
                               // የአገልጋዩ ገደብ፦ በአንድ ፋይል 10MB፣ ጠቅላላ 20MB።
                               if (bytes.length > 10 * 1024 * 1024) {
