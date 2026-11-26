@@ -387,9 +387,9 @@ def proxy_send_photo():
 # IMPORTANT -- SINGLE CONSUMER RULE: Telegram delivers each update to
 # exactly ONE getUpdates consumer. This server's bot polling loop below
 # (bot_polling_loop) is THE consumer: it long-polls getUpdates and
-# answers /start, /link, /plans, /myplans, /recent, /depts, /reset,
-# /info plus the report-review inline-keyboard callbacks. If the
-# Flutter app ALSO polled getUpdates, the two would steal updates
+# answers /start, /link, /menu, /plans, /myplans, /recent, /depts,
+# /reset, /info plus the inline-keyboard callbacks (menu, lists,
+# progress, report review). If the Flutter app ALSO polled getUpdates, the two would steal updates
 # from each other and messages would randomly disappear for one side. So:
 #   * while the bot loop is running, this route returns 409 and the app
 #     must NOT call it -- the app reads chat through the bot / the PHP
@@ -581,7 +581,8 @@ def scheduler_run():
 # ==============================================================
 # የቴሌግራም ቦት አዳማጭ ሉፕ (Telegram Polling Loop)
 # ==============================================================
-def send_telegram_reply(chat_id, text, reply_to_message_id=None):
+def send_telegram_reply(chat_id, text, reply_to_message_id=None, reply_markup=None):
+    """Send a message; reply_markup is an inline keyboard dict (optional)."""
     if not BOT_TOKEN:
         return
     try:
@@ -592,6 +593,8 @@ def send_telegram_reply(chat_id, text, reply_to_message_id=None):
         }
         if reply_to_message_id:
             payload["reply_to_message_id"] = reply_to_message_id
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
         requests.post(f"{BASE_URL}/sendMessage", json=payload, timeout=10)
     except Exception as e:
         print(f"Reply error: {e}")
@@ -602,29 +605,37 @@ def send_telegram_reply(chat_id, text, reply_to_message_id=None):
 _reset_pending = {}
 
 
-def answer_callback_query(callback_query_id, text):
+def answer_callback_query(callback_query_id, text=""):
     if not BOT_TOKEN:
         return
     try:
-        requests.post(f"{BASE_URL}/answerCallbackQuery", json={
+        payload = {
             "callback_query_id": callback_query_id,
-            "text": text,
             "show_alert": False,
-        }, timeout=10)
+        }
+        if text:
+            payload["text"] = text
+        requests.post(f"{BASE_URL}/answerCallbackQuery", json=payload, timeout=10)
     except Exception as e:
         print(f"answerCallbackQuery error: {e}")
 
 
-def edit_message_text(chat_id, message_id, text):
+def edit_message_text(chat_id, message_id, text, reply_markup=None):
+    """Edit a message's text (and keyboard). Telegram ignores an edit
+    whose text is identical to the current one — callers must change
+    something (page, progress, view) before editing."""
     if not BOT_TOKEN:
         return
     try:
-        requests.post(f"{BASE_URL}/editMessageText", json={
+        payload = {
             "chat_id": chat_id,
             "message_id": message_id,
             "text": text,
             "parse_mode": "HTML",
-        }, timeout=10)
+        }
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
+        requests.post(f"{BASE_URL}/editMessageText", json=payload, timeout=10)
     except Exception as e:
         print(f"editMessageText error: {e}")
 
@@ -670,12 +681,490 @@ def handle_review_callback(callback):
     )
 
 
+# ==============================================================
+# Modern bot UI (2026-11-26) — inline menus, paginated plan
+# cards, per-plan progress buttons. Telegram cannot show the
+# app's maroon / gold colours, so the app's look is mirrored
+# with clean header blocks, status chips, progress bars and
+# Ethiopian dates. Every button does something: navigation is
+# encoded in the callback data (no server-side button state),
+# and every data-changing callback re-checks the clicker
+# server-side (linked user + own department) before acting.
+# Callback data is namespaced and short (Telegram limit: 64
+# bytes): menu | myplans:<page> | recent:<page> | plans |
+# depts | dept:<id>:<page> | plan:<id>:<src> |
+# prog:<id>:<pct>:<src> | report:<id> | link | reset | info |
+# noop | review:approve|reject:<id>.
+# ==============================================================
+PAGE_SIZE = 5
+_DIV = "━━━━━━━━━━━━━━━"
+_REPORT_STATUS_AM = {
+    "draft": "ረቂቅ",
+    "submitted": "ሪፖርት ተልኳል",
+    "under_review": "በግምገማ ላይ",
+    "approved": "ጸድቋል",
+    "rejected": "አልተቀበልም",
+}
+
+
+def _today_str():
+    """Today in Addis Ababa time (the Render container runs on UTC)."""
+    return _dt.now(_tz(_td(hours=3))).strftime("%Y-%m-%d")
+
+
+def _week_str():
+    return (_dt.now(_tz(_td(hours=3))) + _td(days=7)).strftime("%Y-%m-%d")
+
+
+def progress_bar(pct):
+    """10-block progress bar, e.g. ▓▓▓▓▓▓░░░░ 60%."""
+    pct = max(0, min(100, int(pct or 0)))
+    filled = int(round(pct / 10))
+    return "▓" * filled + "░" * (10 - filled) + f" {pct}%"
+
+
+def plan_status_chip(plan):
+    """Status chip for one plan (API due date + latest report)."""
+    if (plan.get("progress_percent") or 0) >= 100:
+        return "✅ ተጠናቋል"
+    if plan.get("latest_report_status") in ("submitted", "under_review", "approved"):
+        return "📝 ሪፖርት ተልኳል"
+    today = _today_str()
+    due = plan.get("due_date") or ""
+    if due and due < today:
+        return "🔴 ዘግይቷል"
+    if due and due <= _week_str():
+        return "⏰ ቀኑ ደርሷል"
+    return "📋 እየተሰራ ነው"
+
+
+def plan_card(plan, number=None):
+    """One plan as a formatted card block."""
+    title = _html.escape(_short(plan.get("main_task"), 90))
+    dept = _html.escape(plan.get("department_name") or "")
+    due = plan.get("due_date_ethiopian") or plan.get("due_date") or "—"
+    head = f"<b>{number}. {title}</b>\n" if number else f"<b>{title}</b>\n"
+    return (
+        head
+        + f"🏢 {dept}  •  📅 {due}\n"
+        + f"{plan_status_chip(plan)}  •  {progress_bar(plan.get('progress_percent') or 0)}"
+    )
+
+
+def sort_plans_for_list(plans):
+    """Overdue first, then by due date — the order every list uses."""
+    today = _today_str()
+
+    def key(p):
+        due = p.get("due_date") or "9999-12-31"
+        overdue = 0 if (due < today and (p.get("progress_percent") or 0) < 100) else 1
+        return (overdue, due, str(p.get("id") or ""))
+
+    return sorted(plans, key=key)
+
+
+def kb_menu():
+    """Main menu inline keyboard."""
+    return {"inline_keyboard": [
+        [{"text": "📌 የእኔ እቅዶች", "callback_data": "myplans:0"}],
+        [{"text": "📊 ማጠቃለያ", "callback_data": "plans"},
+         {"text": "⏰ የቅርብ ቀናት", "callback_data": "recent:0"}],
+        [{"text": "🏢 ክፍሎች", "callback_data": "depts"},
+         {"text": "🔗 አገናኝ", "callback_data": "link"}],
+        [{"text": "🔑 የይለፍ ቃል ዳግም ማስጀመር", "callback_data": "reset"}],
+        [{"text": "ℹ️ መረጃ", "callback_data": "info"}],
+    ]}
+
+
+def kb_home_row():
+    return [[{"text": "🏠 ዋና ማውጫ", "callback_data": "menu"}]]
+
+
+def kb_page_nav(prefix, page, total_pages):
+    """◀️ ▶️ navigation + page indicator + back-to-menu."""
+    row = []
+    if page > 0:
+        row.append({"text": "◀️ ቀዳሚ", "callback_data": f"{prefix}:{page - 1}"})
+    row.append({"text": f"ገጽ {page + 1}/{max(total_pages, 1)}", "callback_data": "noop"})
+    if page < total_pages - 1:
+        row.append({"text": "ቀጣይ ▶️", "callback_data": f"{prefix}:{page + 1}"})
+    return {"inline_keyboard": [row] + kb_home_row()}
+
+
+def kb_plan_list(plans, page, prefix):
+    """One button per plan on this page + navigation rows."""
+    rows = []
+    for i, p in enumerate(plans[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]):
+        num = page * PAGE_SIZE + i + 1
+        rows.append([{"text": f"{num}. {_short(p.get('main_task'), 50)}",
+                      "callback_data": f"plan:{p['id']}:{prefix}:{page}"}])
+    total_pages = max(1, (len(plans) + PAGE_SIZE - 1) // PAGE_SIZE)
+    rows.extend(kb_page_nav(prefix, page, total_pages)["inline_keyboard"])
+    return {"inline_keyboard": rows}
+
+
+def menu_text(user_name, linked_user):
+    if linked_user:
+        link_line = (
+            f"✅ <b>{linked_user.get('full_name', '')}</b> — "
+            f"{linked_user.get('department_name', '')} ጋር ተገናኝቷል።\n"
+        )
+    else:
+        link_line = "🔗 Telegramህን አገናኝተህ የክፍልህን እቅዶች እይ።\n"
+    return (
+        "🏛 <b>ዐጸደ ትጉሃን ሰንበት ት/ቤት</b>\n"
+        f"{_DIV}\n"
+        f"ሰላም <b>{_html.escape(user_name)}</b> 🕊️\n"
+        f"{link_line}"
+        f"{_DIV}\n"
+        "ከታች ካለው ማውጫ ምረጥ፦"
+    )
+
+
+def render_plan_page(plans, page, prefix, title):
+    """One page of plan cards. Returns (text, keyboard)."""
+    plans = sort_plans_for_list(plans)
+    total_pages = max(1, (len(plans) + PAGE_SIZE - 1) // PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    page_plans = plans[page * PAGE_SIZE:(page + 1) * PAGE_SIZE]
+    lines = [title, _DIV, ""]
+    if not page_plans:
+        lines.append("ምንም እቅድ የለም። 🎉")
+    for i, p in enumerate(page_plans):
+        lines.append(plan_card(p, page * PAGE_SIZE + i + 1))
+        lines.append("")
+    lines.append(f"📄 ገጽ {page + 1}/{total_pages}  •  ጠቅላላ፦ {len(plans)} እቅዶች")
+    return "\n".join(lines).strip(), kb_plan_list(plans, page, prefix)
+
+
+def render_plan_detail(plan, user, src):
+    """Full detail of one plan + action buttons. Returns (text, keyboard)."""
+    title = _html.escape(plan.get("main_task") or "እቅድ")
+    dept = _html.escape(plan.get("department_name") or "")
+    due = plan.get("due_date_ethiopian") or plan.get("due_date") or "—"
+    schedule = _html.escape(plan.get("execution_time") or "")
+    detail = _html.escape(plan.get("detail_task") or "")
+    pct = plan.get("progress_percent") or 0
+    lines = [f"📌 <b>{title}</b>", _DIV, f"🏢 {dept}", f"📅 የሚጠበቅበት ቀን፦ {due}"]
+    if schedule:
+        lines.append(f"🗓 መርሐግብር፦ {schedule}")
+    if detail:
+        lines.append(f"\n{detail}")
+    lines.append("")
+    lines.append(f"{plan_status_chip(plan)}  •  {progress_bar(pct)}")
+    if plan.get("is_postponed"):
+        lines.append("↩️ ይህ እቅድ ተላልፏል።")
+    report = plan.get("latest_report_status")
+    if report:
+        lines.append(f"📝 የሪፖርት ሁኔታ፦ {_REPORT_STATUS_AM.get(report, report)}")
+    # Progress buttons: only a linked member of the plan's own
+    # department — the office and audit are view-only in the bot.
+    can_edit = bool(
+        user
+        and plan.get("department_id") == user.get("department_id")
+        and not user.get("is_super_admin")
+        and not user.get("can_view_all")
+    )
+    rows = []
+    if can_edit:
+        rows.append([
+            {"text": "25%", "callback_data": f"prog:{plan['id']}:25:{src}"},
+            {"text": "50%", "callback_data": f"prog:{plan['id']}:50:{src}"},
+            {"text": "75%", "callback_data": f"prog:{plan['id']}:75:{src}"},
+            {"text": "100% ✅", "callback_data": f"prog:{plan['id']}:100:{src}"},
+        ])
+    rows.append([{"text": "📝 ሪፖርት በአፕ አስገባ", "callback_data": f"report:{plan['id']}"}])
+    rows.append([{"text": "🔙 ተመለስ", "callback_data": src}])
+    return "\n".join(lines), {"inline_keyboard": rows}
+
+
+def find_plan(chat_id, plan_id):
+    """One plan this chat may see, plus the linked user (or None)."""
+    user = bot_user_by_chat(chat_id)
+    if user:
+        data = bot_api("plans_for", {"chat_id": str(chat_id)})
+        plans = (data or {}).get("plans", []) or []
+    else:
+        data = bot_api("plans_list", {})
+        plans = (data or {}).get("plans", []) or []
+    for p in plans:
+        if str(p.get("id")) == str(plan_id):
+            return p, user
+    return None, user
+
+
+def _start_reset(chat_id):
+    """Begin the password-reset flow for this chat (command or button)."""
+    linked_user = bot_user_by_chat(chat_id)
+    if linked_user:
+        _do_reset_request(chat_id, linked_user.get("username", ""), None)
+        return
+    _reset_pending[str(chat_id)] = {"stage": "username", "ts": time.time()}
+    send_telegram_reply(
+        chat_id,
+        "🔑 <b>የይለፍ ቃል ዳግም ማስጀመር</b>\n\n"
+        "የተጠቃሚ ስምህን ላክ (ለምሳሌ፦ <b>mezmur</b>)።\n"
+        "ኮድ ወደተገናኘው Telegram accountህ ይላካል።\n"
+        "ለማቋረጥ /cancel ላክ።",
+    )
+
+
+def _show_myplans(chat_id, message_id, cb_id, page):
+    user = bot_user_by_chat(chat_id)
+    if not user:
+        edit_message_text(
+            chat_id, message_id,
+            "📌 <b>የእኔ እቅዶች</b>\n\n"
+            "የራስህን ክፍል እቅዶች ለማየት Telegramህን ማገናኘት አለብህ።\n\n"
+            "በአፕ ውስጥ Telegram አገናኝ የሚለውን ተጫን፣ ኮድ አግኝተህ እዚህ <b>/start &lt;ኮድ&gt;</b> ብለህ ላክ።",
+            {"inline_keyboard": [
+                [{"text": "🔗 Telegram አገናኝ", "callback_data": "link"}],
+                [{"text": "🏠 ዋና ማውጫ", "callback_data": "menu"}],
+            ]},
+        )
+        answer_callback_query(cb_id, "Telegram ማገናኘት አለብህ።")
+        return
+    data = bot_api("plans_for", {"chat_id": str(chat_id)})
+    if not data:
+        answer_callback_query(cb_id, "እቅዶችን ማምጣት አልተቻለም — እንደገና ሞክር።")
+        return
+    plans = data.get("plans", []) or []
+    title = (
+        f"📌 <b>የ{user.get('department_name', '')} እቅዶች</b>\n"
+        f"ጠቅላላ፦ {data.get('total', len(plans))}  •  🚨 የዘገዩ፦ {data.get('overdue_count', 0)}"
+    )
+    text, kb = render_plan_page(plans, page, "myplans", title)
+    edit_message_text(chat_id, message_id, text, kb)
+    answer_callback_query(cb_id)
+
+
+def _show_recent(chat_id, message_id, cb_id, page):
+    data = bot_api("recent_for", {"chat_id": str(chat_id)})
+    if not data:
+        answer_callback_query(cb_id, "እቅዶችን ማምጣት አልተቻለም — እንደገና ሞክር።")
+        return
+    plans = data.get("plans", []) or []
+    scope = ""
+    if data.get("user"):
+        scope = f" — {data['user'].get('department_name', '')}"
+    title = f"⏰ <b>የቅርብ 7 ቀናት እቅዶች{scope}</b>"
+    text, kb = render_plan_page(plans, page, "recent", title)
+    edit_message_text(chat_id, message_id, text, kb)
+    answer_callback_query(cb_id)
+
+
+def _show_summary(chat_id, message_id, cb_id):
+    data = bot_api("plans_summary", {})
+    if not data:
+        answer_callback_query(cb_id, "ማጠቃለያ ማምጣት አልተቻለም — እንደገና ሞክር።")
+        return
+    depts = bot_api("departments", {}) or {}
+    dept_list = depts.get("departments") or [] if isinstance(depts, dict) else []
+    by_dept = data.get("by_department") or {}
+    lines = [
+        "📊 <b>የ2019 ዓ.ም የእቅዶች ማጠቃለያ</b>",
+        _DIV,
+        f"ጠቅላላ፦ <b>{data.get('total', 0)}</b> እቅዶች  •  🚨 የዘገዩ፦ <b>{data.get('overdue_count', 0)}</b>",
+        "",
+    ]
+    rows = []
+    for d in dept_list:
+        name = d.get("name") or ""
+        cnt = by_dept.get(name, 0)
+        lines.append(f"• <b>{_html.escape(name)}</b>፦ {cnt} እቅዶች")
+        rows.append([{"text": f"🏢 {name} ({cnt})", "callback_data": f"dept:{d.get('id')}:0"}])
+    if not dept_list:
+        for name, cnt in by_dept.items():
+            lines.append(f"• <b>{_html.escape(name)}</b>፦ {cnt} እቅዶች")
+    lines.append("")
+    lines.append("ክፍል ምረጥ — እቅዶቹን ለማየት፤ ወይም Telegramህን አገናኝተህ /myplans ብል።")
+    rows.append([{"text": "🏠 ዋና ማውጫ", "callback_data": "menu"}])
+    edit_message_text(chat_id, message_id, "\n".join(lines), {"inline_keyboard": rows})
+    answer_callback_query(cb_id)
+
+
+def _dept_name(dept_id):
+    """Live department name for an id (falls back to the id itself)."""
+    depts = bot_api("departments", {}) or {}
+    for d in (depts.get("departments") or [] if isinstance(depts, dict) else []):
+        if str(d.get("id")) == str(dept_id):
+            return d.get("name") or dept_id
+    return dept_id
+
+
+def _show_depts(chat_id, message_id, cb_id):
+    depts = bot_api("departments", {}) or {}
+    dept_list = depts.get("departments") or [] if isinstance(depts, dict) else []
+    if not dept_list:
+        edit_message_text(
+            chat_id, message_id,
+            "🏛️ <b>የሰንበት ትምህርት ቤቱ ክፍሎች ዝርዝር፦</b>\n\n"
+            "1. ትምህርት እና ስልጠና ክፍል\n"
+            "2. መርሃግብር እና ጉባኤያት ክፍል\n"
+            "3. መዝሙርና ስነጥበብ ክፍል\n"
+            "4. ልማትና በጎ አድራጎት ክፍል\n"
+            "5. መረጃና የውስጥ ግንኙነት ክፍል\n"
+            "6. ቁጥጥር ክፍል\n"
+            "7. በጀት እና ንብረት አስተዳደር ክፍል\n"
+            "8. ሰው ሀብት አስተዳደር ክፍል\n"
+            "9. ጽ/ቤት\n",
+            {"inline_keyboard": kb_home_row()},
+        )
+        answer_callback_query(cb_id)
+        return
+    lines = ["🏛️ <b>የሰንበት ትምህርት ቤቱ ክፍሎች፦</b>", _DIV, ""]
+    rows = []
+    for d in dept_list:
+        name = d.get("name") or ""
+        lines.append(f"• {name}")
+        rows.append([{"text": f"🏢 {name}", "callback_data": f"dept:{d.get('id')}:0"}])
+    lines.append("")
+    lines.append("ክፍል ምረጥ — እቅዶቹን ለማየት።")
+    rows.extend(kb_home_row())
+    edit_message_text(chat_id, message_id, "\n".join(lines), {"inline_keyboard": rows})
+    answer_callback_query(cb_id)
+
+
+def _show_dept_plans(chat_id, message_id, cb_id, dept_id, page):
+    data = bot_api("plans_list", {"department_id": dept_id})
+    if not data:
+        answer_callback_query(cb_id, "እቅዶችን ማምጣት አልተቻለም — እንደገና ሞክር።")
+        return
+    plans = data.get("plans", []) or []
+    dept_name = _dept_name(dept_id)
+    title = (
+        f"🏢 <b>{dept_name}</b>\n"
+        f"ጠቅላላ፦ {data.get('total', len(plans))}  •  🚨 የዘገዩ፦ {data.get('overdue_count', 0)}"
+    )
+    text, kb = render_plan_page(plans, page, f"dept:{dept_id}", title)
+    edit_message_text(chat_id, message_id, text, kb)
+    answer_callback_query(cb_id)
+
+
+def _show_plan_detail(chat_id, message_id, cb_id, plan_id, src):
+    plan, user = find_plan(chat_id, plan_id)
+    if not plan:
+        answer_callback_query(cb_id, "እቅዱ አልተገኘም።")
+        return
+    text, kb = render_plan_detail(plan, user, src)
+    edit_message_text(chat_id, message_id, text, kb)
+    answer_callback_query(cb_id)
+
+
+def _do_progress(chat_id, message_id, cb_id, plan_id, pct, src):
+    """A progress button tap — verify everything server-side first,
+    then update and re-render the detail card with the new bar."""
+    user = bot_user_by_chat(chat_id)
+    if not user:
+        answer_callback_query(cb_id, "Telegram ማገናኘት አለብህ።")
+        return
+    if user.get("is_super_admin") or user.get("can_view_all"):
+        answer_callback_query(cb_id, "ጽ/ቤት እቅድ ክንውን ከአፕ ውስጥ ብቻ ነው የሚያዘምነው።")
+        return
+    plan, _ = find_plan(chat_id, plan_id)
+    if not plan:
+        answer_callback_query(cb_id, "እቅዱ አልተገኘም።")
+        return
+    if plan.get("department_id") != user.get("department_id"):
+        answer_callback_query(cb_id, "የሌላ ክፍል እቅድ ክንውን ማዘመን አይቻልም።")
+        return
+    result = bot_api("plan_progress", {
+        "plan_id": plan_id, "progress": pct, "chat_id": str(chat_id),
+    })
+    if not result:
+        answer_callback_query(cb_id, "ክንውን ማዘመን አልተቻለም — እንደገና ሞክር።")
+        return
+    plan, user = find_plan(chat_id, plan_id)
+    if not plan:
+        answer_callback_query(cb_id, "እቅዱ አልተገኘም።")
+        return
+    text, kb = render_plan_detail(plan, user, src)
+    edit_message_text(chat_id, message_id, text, kb)
+    answer_callback_query(cb_id, f"✅ ክንውን {pct}% ሆኗል")
+
+
+def handle_callback_query(callback):
+    """Route every inline-keyboard tap."""
+    data = callback.get("data") or ""
+    cb_id = callback.get("id")
+    msg = callback.get("message") or {}
+    chat_id = (msg.get("chat") or {}).get("id")
+    message_id = msg.get("message_id")
+    if not data:
+        return
+    if data.startswith("review:"):
+        try:
+            handle_review_callback(callback)
+        except Exception as ex:
+            print(f"Error handling review callback: {ex}")
+        return
+    parts = data.split(":")
+    kind = parts[0]
+    try:
+        if kind == "noop":
+            answer_callback_query(cb_id, "ገጽ ለመቀየር ◀️ ቀዳሚ / ቀጣይ ▶️ ተጫን።")
+        elif kind == "menu":
+            user = bot_user_by_chat(chat_id)
+            name = (callback.get("from") or {}).get("first_name", "ተጠቃሚ")
+            edit_message_text(chat_id, message_id, menu_text(name, user), kb_menu())
+            answer_callback_query(cb_id)
+        elif kind == "myplans":
+            _show_myplans(chat_id, message_id, cb_id, int(parts[1]) if len(parts) > 1 else 0)
+        elif kind == "recent":
+            _show_recent(chat_id, message_id, cb_id, int(parts[1]) if len(parts) > 1 else 0)
+        elif kind == "plans":
+            _show_summary(chat_id, message_id, cb_id)
+        elif kind == "depts":
+            _show_depts(chat_id, message_id, cb_id)
+        elif kind == "dept":
+            _show_dept_plans(chat_id, message_id, cb_id, parts[1], int(parts[2]) if len(parts) > 2 else 0)
+        elif kind == "plan":
+            src = ":".join(parts[2:]) or "menu"
+            _show_plan_detail(chat_id, message_id, cb_id, parts[1], src)
+        elif kind == "prog":
+            src = ":".join(parts[3:]) or "menu"
+            _do_progress(chat_id, message_id, cb_id, parts[1], int(parts[2]), src)
+        elif kind == "report":
+            answer_callback_query(cb_id, "ሪፖርት በአፕ ውስጥ ነው የሚላከው።")
+            send_telegram_reply(
+                chat_id,
+                "📝 <b>ሪፖርት በአፕ ውስጥ ነው የሚላከው</b>\n\n"
+                "በአፕ ውስጥ፦ <b>እቅዶች</b> → እቅዱን ምረጥ → <b>«ሪፖርት አስገባ»</b> የሚለውን ተጫን።\n\n"
+                "በቦቱ ውስጥ ሪፖርት መላክ አይቻልም — ሪፖርት ማስረጃዎች (ፎቶ / ፋይል) ስለሚፈልግ ነው።",
+            )
+        elif kind == "link":
+            answer_callback_query(cb_id)
+            send_telegram_reply(
+                chat_id,
+                "🔗 <b>Telegram ማገናኘት</b>\n\n"
+                "በአፕ ውስጥ፦ <b>ዳሽቦርድ / ውይይት</b> → <b>Telegram</b> ቁልፍ → <b>«አገናኝ»</b> → ኮድ አግኝተህ እዚህ <b>/start &lt;ኮድ&gt;</b> ብለህ ላክ።\n\n"
+                "ኮዱ ለ<b>15 ደቂቃ</b> ብቻ ይሰራል።",
+            )
+        elif kind == "reset":
+            answer_callback_query(cb_id)
+            _start_reset(chat_id)
+        elif kind == "info":
+            edit_message_text(
+                chat_id, message_id,
+                "ℹ️ <b>ዐጸደ ትጉሃን የዕቅድና ሪፖርት አስተዳደር ስርዓት</b>\n\n"
+                "ይህ ቦት ከመተግበሪያው ጋር በቀጥታ የተገናኘ ሲሆን፣ ክፍሎች ሪፖርት ሲያስገቡና እቅድ ሲያስተላልፉ በቅጽበት ማሳወቂያዎችን ያደርሳል።\n\n"
+                "🟢 ሁኔታ፦ መስመር ላይ (Online 24/7)",
+                {"inline_keyboard": kb_home_row()},
+            )
+            answer_callback_query(cb_id)
+        else:
+            answer_callback_query(cb_id, "ይህ ቁልፍ አልተረዳም።")
+    except Exception as ex:
+        print(f"Error handling callback {data}: {ex}")
+        answer_callback_query(cb_id, "ስህተት ተፈጥሯል — እንደገና ሞክር።")
+
+
 def handle_update(update):
-    # Inline-keyboard callbacks (report Approve / Reject) come first —
-    # they carry no "message" of their own.
+    # Inline-keyboard callbacks (menu, lists, progress, review) come
+    # first — they carry no "message" of their own.
     if update.get("callback_query"):
         try:
-            handle_review_callback(update["callback_query"])
+            handle_callback_query(update["callback_query"])
         except Exception as ex:
             print(f"Error handling callback: {ex}")
         return
@@ -717,44 +1206,13 @@ def handle_update(update):
                     msg_id,
                 )
             return
-        link_hint = ""
-        if linked_user:
-            link_hint = (
-                f"\n✅ ይህ account ከ<b>{linked_user.get('department_name', '')}</b> "
-                f"({linked_user.get('full_name', '')}) ጋር ተገናኝቷል።\n"
-            )
-        else:
-            link_hint = (
-                "\n🔗 Telegramህን ለማገናኘት፦ በአፕ ውስጥ Telegram አገናኝ የሚለውን "
-                "ተጫን፣ ኮድ አግኝተህ እዚህ <b>/start &lt;ኮድ&gt;</b> ብለህ ላክ።\n"
-            )
-        welcome = (
-            f"ሰላም <b>{user_name}</b> እንኳን ወደ <b>ዐጸደ ትጉሃን ሰንበት ትምህርት ቤት</b> የእቅድና ሪፖርት ቦት በደህና መጡ! 🕊️\n"
-            f"{link_hint}\n"
-            "<b>የሚገኙ ትእዛዞች፦</b>\n"
-            "📋 /plans - የክፍሎች አጠቃላይ እቅድ ማጠቃለያ\n"
-            "📌 /myplans - የኔ ክፍል እቅዶች (የተገናኘ account ብቻ)\n"
-            "⏰ /recent - በቅርብ 7 ቀናት ውስጥ የሚደርሱ እቅዶች\n"
-            "🏢 /depts - የሁሉም ክፍሎች ስም ዝርዝር\n"
-            "🔑 /reset - የይለፍ ቃል ዳግም ማስጀመር\n"
-            "📢 /info - ስለ ቦቱ እና መተግበሪያው መረጃ\n"
-        )
-        send_telegram_reply(chat_id, welcome, msg_id)
+        send_telegram_reply(chat_id, menu_text(user_name, linked_user), msg_id, kb_menu())
 
     elif text.startswith("/reset"):
-        # Linked account? Use their own username straight away.
-        if linked_user:
-            _do_reset_request(chat_id, linked_user.get("username", ""), msg_id)
-            return
-        _reset_pending[str(chat_id)] = {"stage": "username", "ts": time.time()}
-        send_telegram_reply(
-            chat_id,
-            "🔑 <b>የይለፍ ቃል ዳግም ማስጀመር</b>\n\n"
-            "የተጠቃሚ ስምህን ላክ (ለምሳሌ፦ <b>mezmur</b>)።\n"
-            "ኮድ ወደተገናኘው Telegram accountህ ይላካል።\n"
-            "ለማቋረጥ /cancel ላክ።",
-            msg_id,
-        )
+        _start_reset(chat_id)
+
+    elif text.startswith("/menu"):
+        send_telegram_reply(chat_id, menu_text(user_name, linked_user), msg_id, kb_menu())
 
     elif text.startswith("/cancel"):
         _reset_pending.pop(str(chat_id), None)
@@ -764,10 +1222,14 @@ def handle_update(update):
         if not linked_user:
             send_telegram_reply(
                 chat_id,
-                "📌 <b>/myplans</b> የራስህን ክፍል እቅዶች ለማየት Telegramህን ማገናኘት አለብህ።\n\n"
-                "በአፕ ውስጥ Telegram አገናኝ የሚለውን ተጫን፣ ኮድ አግኝተህ እዚህ <b>/start &lt;ኮድ&gt;</b> ብለህ ላክ።\n\n"
-                "የሁሉም ክፍል ማጠቃለያ ለማየት /plans ብል።",
+                "📌 <b>የእኔ እቅዶች</b>\n\n"
+                "የራስህን ክፍል እቅዶች ለማየት Telegramህን ማገናኘት አለብህ።\n\n"
+                "በአፕ ውስጥ Telegram አገናኝ የሚለውን ተጫን፣ ኮድ አግኝተህ እዚህ <b>/start &lt;ኮድ&gt;</b> ብለህ ላክ።",
                 msg_id,
+                {"inline_keyboard": [
+                    [{"text": "🔗 Telegram አገናኝ", "callback_data": "link"}],
+                    [{"text": "🏠 ዋና ማውጫ", "callback_data": "menu"}],
+                ]},
             )
             return
         data = bot_api("plans_for", {"chat_id": str(chat_id)})
@@ -775,32 +1237,12 @@ def handle_update(update):
             send_telegram_reply(chat_id, "⚠️ እቅዶችን ማምጣት አልተቻለም — እባክዎ ትንሽ ቆይተህ እንደገና ሞክር።", msg_id)
             return
         plans = data.get("plans", []) or []
-        # "Today" in Addis Ababa time — the Render container runs on
-        # UTC, and the PHP side also uses Africa/Addis_Ababa.
-        today = _dt.now(_tz(_td(hours=3))).strftime("%Y-%m-%d")
-        overdue = [p for p in plans
-                   if (p.get("due_date") or "") < today
-                   and (p.get("progress_percent") or 0) < 100
-                   and p.get("latest_report_status") not in ("submitted", "under_review", "approved")]
-        upcoming = [p for p in plans
-                    if (p.get("due_date") or "") >= today
-                    and (p.get("progress_percent") or 0) < 100
-                    and p.get("latest_report_status") not in ("submitted", "under_review", "approved")]
-        upcoming.sort(key=lambda p: (p.get("due_date") or "", p.get("id") or ""))
-        lines = [f"📌 <b>የ{linked_user.get('department_name', '')} እቅዶች (ጠቅላላ፦ {data.get('total', len(plans))})፦</b>\n"]
-        if overdue:
-            lines.append(f"🚨 <b>የዘገዩ ({len(overdue)})፦</b>")
-            for p in overdue[:8]:
-                lines.append(f"• “{_short(p.get('main_task'))}” — {p.get('due_date_ethiopian') or p.get('due_date') or ''}")
-            lines.append("")
-        if upcoming:
-            lines.append(f"⏰ <b>በቅርብ የሚደርሱ ({len(upcoming)})፦</b>")
-            for p in upcoming[:8]:
-                lines.append(f"• “{_short(p.get('main_task'))}” — {p.get('due_date_ethiopian') or p.get('due_date') or ''}")
-        if not overdue and not upcoming:
-            lines.append("🎉 ምንም የዘገየ ወይም በቅርብ የሚደርስ እቅድ የለም!")
-        lines.append("\n<i>ዝርዝር እቅዶችን እና ሪፖርቶችን በሞባይል መተግበሪያው ውስጥ መከታተል ይችላሉ!</i>")
-        send_telegram_reply(chat_id, "\n".join(lines), msg_id)
+        title = (
+            f"📌 <b>የ{linked_user.get('department_name', '')} እቅዶች</b>\n"
+            f"ጠቅላላ፦ {data.get('total', len(plans))}  •  🚨 የዘገዩ፦ {data.get('overdue_count', 0)}"
+        )
+        text, kb = render_plan_page(plans, 0, "myplans", title)
+        send_telegram_reply(chat_id, text, msg_id, kb)
 
     elif text.startswith("/recent"):
         data = bot_api("recent_for", {"chat_id": str(chat_id)})
@@ -811,33 +1253,38 @@ def handle_update(update):
         scope = ""
         if data.get("user"):
             scope = f" — {data['user'].get('department_name', '')}"
-        if not plans:
-            send_telegram_reply(
-                chat_id,
-                f"⏰ <b>የቅርብ 7 ቀናት እቅዶች{scope}፦</b>\n\nበቅርብ 7 ቀናት ውስጥ የሚደርስ ወይም የዘገየ እቅድ የለም። 🎉",
-                msg_id,
-            )
-            return
-        lines = [f"⏰ <b>የቅርብ 7 ቀናት እቅዶች{scope} ({len(plans)})፦</b>\n"]
-        for p in plans[:15]:
-            dept = f"[{p.get('department_name', '')}] " if not data.get("user") else ""
-            lines.append(f"• {dept}“{_short(p.get('main_task'))}” — {p.get('due_date_ethiopian') or p.get('due_date') or ''}")
-        send_telegram_reply(chat_id, "\n".join(lines), msg_id)
+        title = f"⏰ <b>የቅርብ 7 ቀናት እቅዶች{scope}</b>"
+        text, kb = render_plan_page(plans, 0, "recent", title)
+        send_telegram_reply(chat_id, text, msg_id, kb)
 
     elif text.startswith("/depts"):
-        depts_text = (
-            "🏛️ <b>የሰንበት ትምህርት ቤቱ ክፍሎች ዝርዝር፦</b>\n\n"
-            "1. ትምህርት እና ስልጠና ክፍል\n"
-            "2. መርሃግብር እና ጉባኤያት ክፍል\n"
-            "3. መዝሙርና ስነጥበብ ክፍል\n"
-            "4. ልማትና በጎ አድራጎት ክፍል\n"
-            "5. መረጃና የውስጥ ግንኙነት ክፍል\n"
-            "6. ቁጥጥር ክፍል\n"
-            "7. በጀት እና ንብረት አስተዳደር ክፍል\n"
-            "8. ሰው ሀብት አስተዳደር ክፍል\n"
-            "9. ጽ/ቤት\n"
-        )
-        send_telegram_reply(chat_id, depts_text, msg_id)
+        depts = bot_api("departments", {}) or {}
+        dept_list = depts.get("departments") or [] if isinstance(depts, dict) else []
+        if not dept_list:
+            depts_text = (
+                "🏛️ <b>የሰንበት ትምህርት ቤቱ ክፍሎች ዝርዝር፦</b>\n\n"
+                "1. ትምህርት እና ስልጠና ክፍል\n"
+                "2. መርሃግብር እና ጉባኤያት ክፍል\n"
+                "3. መዝሙርና ስነጥበብ ክፍል\n"
+                "4. ልማትና በጎ አድራጎት ክፍል\n"
+                "5. መረጃና የውስጥ ግንኙነት ክፍል\n"
+                "6. ቁጥጥር ክፍል\n"
+                "7. በጀት እና ንብረት አስተዳደር ክፍል\n"
+                "8. ሰው ሀብት አስተዳደር ክፍል\n"
+                "9. ጽ/ቤት\n"
+            )
+            send_telegram_reply(chat_id, depts_text, msg_id)
+            return
+        lines = ["🏛️ <b>የሰንበት ትምህርት ቤቱ ክፍሎች፦</b>", _DIV, ""]
+        rows = []
+        for d in dept_list:
+            name = d.get("name") or ""
+            lines.append(f"• {name}")
+            rows.append([{"text": f"🏢 {name}", "callback_data": f"dept:{d.get('id')}:0"}])
+        lines.append("")
+        lines.append("ክፍል ምረጥ — እቅዶቹን ለማየት።")
+        rows.extend(kb_home_row())
+        send_telegram_reply(chat_id, "\n".join(lines), msg_id, {"inline_keyboard": rows})
 
     elif text.startswith("/plans") or text.startswith("/plan"):
         data = bot_api("plans_summary", {})
@@ -858,13 +1305,28 @@ def handle_update(update):
             lines.append("\n<i>ዝርዝር እቅዶችን እና ሪፖርቶችን በሞባይል መተግበሪያው ውስጥ መከታተል ይችላሉ!</i>")
             send_telegram_reply(chat_id, "\n".join(lines), msg_id)
             return
-        lines = [f"📊 <b>የ2019 ዓ.ም የእቅዶች ማጠቃለያ (ጠቅላላ፦ {data.get('total', 0)})፦</b>\n"]
-        for dept, cnt in (data.get("by_department") or {}).items():
-            lines.append(f"• <b>{dept}</b>፦ {cnt} እቅዶች")
-        if data.get("overdue_count"):
-            lines.append(f"\n🚨 <b>የዘገዩ፦ {data['overdue_count']}</b>")
-        lines.append("\n<i>የራስህን ክፍል ብቻ ለማየት Telegramህን አገናኝተህ /myplans ብል።</i>")
-        send_telegram_reply(chat_id, "\n".join(lines), msg_id)
+        lines = [
+            "📊 <b>የ2019 ዓ.ም የእቅዶች ማጠቃለያ</b>",
+            _DIV,
+            f"ጠቅላላ፦ <b>{data.get('total', 0)}</b> እቅዶች  •  🚨 የዘገዩ፦ <b>{data.get('overdue_count', 0)}</b>",
+            "",
+        ]
+        rows = []
+        depts = bot_api("departments", {}) or {}
+        dept_list = depts.get("departments") or [] if isinstance(depts, dict) else []
+        by_dept = data.get("by_department") or {}
+        for d in dept_list:
+            name = d.get("name") or ""
+            cnt = by_dept.get(name, 0)
+            lines.append(f"• <b>{_html.escape(name)}</b>፦ {cnt} እቅዶች")
+            rows.append([{"text": f"🏢 {name} ({cnt})", "callback_data": f"dept:{d.get('id')}:0"}])
+        if not dept_list:
+            for name, cnt in by_dept.items():
+                lines.append(f"• <b>{_html.escape(name)}</b>፦ {cnt} እቅዶች")
+        lines.append("")
+        lines.append("ክፍል ምረጥ — እቅዶቹን ለማየት፤ ወይም Telegramህን አገናኝተህ /myplans ብል።")
+        rows.append([{"text": "🏠 ዋና ማውጫ", "callback_data": "menu"}])
+        send_telegram_reply(chat_id, "\n".join(lines), msg_id, {"inline_keyboard": rows})
 
     elif text.startswith("/info"):
         info_text = (
@@ -872,7 +1334,7 @@ def handle_update(update):
             "ይህ ቦት ከመተግበሪያው ጋር በቀጥታ የተገናኘ ሲሆን፣ ክፍሎች ሪፖርት ሲያስገቡና እቅድ ሲያስተላልፉ በቅጽበት ማሳወቂያዎችን ያደርሳል።\n\n"
             "🟢 ሁኔታ፦ መስመር ላይ (Online 24/7)"
         )
-        send_telegram_reply(chat_id, info_text, msg_id)
+        send_telegram_reply(chat_id, info_text, msg_id, {"inline_keyboard": kb_home_row()})
 
     elif not text.startswith("/"):
         # /reset የጠየቀ ሰው የተጠቃሚ ስሙን ሲልክ (multi-step reset)።
@@ -888,7 +1350,7 @@ def handle_update(update):
         # Unknown free text — point at the commands, do not stay silent.
         send_telegram_reply(
             chat_id,
-            "ትእዛዙን አልተረዳሁም። የሚገኙ ትእዛዞች፦ /plans, /myplans, /recent, /depts, /reset, /info — ወይም /help።",
+            "ትእዛዙን አልተረዳሁም። /menu ብለህ ከማውጫው ምረጥ — ወይም /plans, /myplans, /recent, /depts, /reset, /info።",
             msg_id,
         )
 
