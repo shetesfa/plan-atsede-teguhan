@@ -53,10 +53,10 @@ void main() {
   });
 
   group('Department model', () {
-    test('There are 10 departments with unique ids', () {
-      expect(Department.allDepartments.length, 10);
+    test('There are 9 departments with unique ids', () {
+      expect(Department.allDepartments.length, 9);
       final ids = Department.allDepartments.map((d) => d.id).toSet();
-      expect(ids.length, 10);
+      expect(ids.length, 9);
     });
 
     test('First department is the super-admin office', () {
