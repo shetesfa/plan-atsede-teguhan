@@ -1364,11 +1364,12 @@ class _PlansScreenState extends State<PlansScreen> {
                         tooltip: 'እቅድ አስተላልፍ (ቀን ቀይር)',
                         onPressed: () => _showPostponeDialog(item),
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
-                        tooltip: 'እቅድ ሰርዝ',
-                        onPressed: () => _deletePlan(item),
-                      ),
+                      if (AuthService.canManagePlan(item.departmentId))
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                          tooltip: 'እቅድ ሰርዝ',
+                          onPressed: () => _deletePlan(item),
+                        ),
                     ],
                   ),
                 ),
@@ -1594,11 +1595,12 @@ class _PlansScreenState extends State<PlansScreen> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    IconButton(
-                      onPressed: () => _deletePlan(item),
-                      icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
-                      tooltip: 'እቅድ ሰርዝ',
-                    ),
+                    if (AuthService.canManagePlan(item.departmentId))
+                      IconButton(
+                        onPressed: () => _deletePlan(item),
+                        icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                        tooltip: 'እቅድ ሰርዝ',
+                      ),
                     TextButton.icon(
                       onPressed: () => _showPostponeDialog(item),
                       icon: const Icon(Icons.update, size: 15, color: Colors.deepOrange),

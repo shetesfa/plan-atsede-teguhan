@@ -32,6 +32,15 @@ class AuthService {
   static bool get isLoggedIn => currentDepartment != null && currentUserProfile != null;
   static bool get isSuperAdmin => currentUserProfile?['is_super_admin'] == true;
 
+  // 2026-11-26: department admin — more permission than a member, but
+  // NEVER all-department access like the office (education is one).
+  static bool get isDeptAdmin => currentUserProfile?['is_dept_admin'] == true;
+
+  /// A plan can be deleted/managed by the office (super admin) or by a
+  /// department admin of that plan's OWN department only.
+  static bool canManagePlan(String departmentId) =>
+      isSuperAdmin || (isDeptAdmin && currentDepartment?.id == departmentId);
+
   // Audit fix 2026-11-25: the server flags accounts still on their
   // seed password (users.must_change_password). The app shows the
   // change-password screen until the flag is cleared.

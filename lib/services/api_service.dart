@@ -399,6 +399,96 @@ class ApiService {
     }
   }
 
+  // 7b. ተጠቃሚዎች አስተዳደር (Users — super admin only, 2026-11-26)
+  Future<List<Map<String, dynamic>>> fetchUsers() async {
+    final uri = Uri.parse('$baseUrl/users.php');
+    try {
+      final res = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 30));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (data['status'] == 'success') {
+          final list = (data['data']?['users'] as List?) ?? [];
+          return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+        }
+      }
+    } catch (e) {
+      debugPrint('fetchUsers error: $e');
+    }
+    return [];
+  }
+
+  Future<Map<String, dynamic>> createUser(Map<String, dynamic> userData) async {
+    final url = Uri.parse('$baseUrl/users.php?action=create');
+    try {
+      final res = await http.post(
+        url,
+        headers: _headers,
+        body: jsonEncode(userData),
+      ).timeout(const Duration(seconds: 30));
+
+      final data = jsonDecode(res.body);
+      if ((res.statusCode == 200 || res.statusCode == 201) && data['status'] == 'success') {
+        return {'success': true, 'data': data['data']};
+      }
+      return {'success': false, 'message': data['message'] ?? 'ተጠቃሚውን መፍጠር አልተቻለም'};
+    } catch (e) {
+      return {'success': false, 'message': 'የአውታረ-መረብ ስህተት፦ $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> updateUser(int userId, Map<String, dynamic> userData) async {
+    final url = Uri.parse('$baseUrl/users.php?action=update');
+    try {
+      final res = await http.post(
+        url,
+        headers: _headers,
+        body: jsonEncode({'user_id': userId, ...userData}),
+      ).timeout(const Duration(seconds: 30));
+
+      final data = jsonDecode(res.body);
+      if (res.statusCode == 200 && data['status'] == 'success') {
+        return {'success': true, 'data': data['data']};
+      }
+      return {'success': false, 'message': data['message'] ?? 'የተጠቃሚውን መረጃ ማሻሻል አልተቻለም'};
+    } catch (e) {
+      return {'success': false, 'message': 'የአውታረ-መረብ ስህተት፦ $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> resetUserPassword(int userId, String newPassword) async {
+    final url = Uri.parse('$baseUrl/users.php?action=reset_password');
+    try {
+      final res = await http.post(
+        url,
+        headers: _headers,
+        body: jsonEncode({'user_id': userId, 'new_password': newPassword}),
+      ).timeout(const Duration(seconds: 30));
+
+      final data = jsonDecode(res.body);
+      if (res.statusCode == 200 && data['status'] == 'success') {
+        return {'success': true, 'data': data['data']};
+      }
+      return {'success': false, 'message': data['message'] ?? 'የይለፍ ቃል ዳግም ማስጀመር አልተቻለም'};
+    } catch (e) {
+      return {'success': false, 'message': 'የአውታረ-መረብ ስህተት፦ $e'};
+    }
+  }
+
+  Future<Map<String, dynamic>> deactivateUser(int userId) async {
+    final url = Uri.parse('$baseUrl/users.php?id=$userId');
+    try {
+      final res = await http.delete(url, headers: _headers).timeout(const Duration(seconds: 30));
+
+      final data = jsonDecode(res.body);
+      if (res.statusCode == 200 && data['status'] == 'success') {
+        return {'success': true, 'data': data['data']};
+      }
+      return {'success': false, 'message': data['message'] ?? 'ተጠቃሚውን ማሰናከል አልተቻለም'};
+    } catch (e) {
+      return {'success': false, 'message': 'የአውታረ-መረብ ስህተት፦ $e'};
+    }
+  }
+
   // 8. ማሳወቂያዎችን ማምጣት (Get Notifications)
   Future<Map<String, dynamic>> getNotifications({String? dept, bool unreadOnly = false}) async {
     final queryParams = <String, String>{};

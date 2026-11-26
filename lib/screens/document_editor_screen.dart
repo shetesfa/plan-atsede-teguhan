@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:file_picker/file_picker.dart';
 import 'package:excel/excel.dart' as ex;
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import '../services/api_service.dart';
 import '../services/office_export_service.dart';
 import '../widgets/telegram_connect_dialog.dart';
@@ -208,6 +212,137 @@ class _DocumentEditorScreenState extends State<DocumentEditorScreen>
   }
 
   // 3. ሰነዱን በባክኤንድ ማህደር ማስቀመጥ (Save to Documents Archive)
+  /// እውነተኛ PDF ማመንጨት (2026-11-26) — ከዚህ በፊት ያለው ቁልፍ "ተከናውኗል"
+  /// ብሎ ያሳይ ነበር ግን PDF አያደርግም ነበር። አሁን የቤተክርስቲያኗን አርማና
+  /// ማርቆ የያዘ እውነተኛ PDF ይፈጥራል እና የShare መስኮት ይከፍታል።
+  Future<void> _exportWordPdf() async {
+    setState(() => isGenerating = true);
+    try {
+      final fontData = await rootBundle.load('assets/nyala.ttf');
+      final font = pw.Font.ttf(fontData);
+      final logoData = await rootBundle.load('assets/icon.png');
+      final logo = pw.MemoryImage(logoData.buffer.asUint8List());
+
+      final title = wordTitleCtrl.text.trim();
+      final points = wordPointsCtrl.text
+          .split('\n')
+          .map((l) => l.trim().replaceFirst(RegExp(r'^[•\-\*]\s*'), ''))
+          .where((l) => l.isNotEmpty)
+          .toList();
+      final bodyLines = wordBodyCtrl.text
+          .trim()
+          .split('\n')
+          .map((l) => l.trim())
+          .where((l) => l.isNotEmpty)
+          .toList();
+
+      final doc = pw.Document();
+      doc.addPage(
+        pw.MultiPage(
+          theme: pw.ThemeData.withFont(base: font, bold: font),
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(36),
+          build: (context) => [
+            pw.Row(
+              children: [
+                pw.Image(logo, width: 48, height: 48),
+                pw.SizedBox(width: 12),
+                pw.Expanded(
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text(
+                        orgOrHeaderCtrl.text.trim(),
+                        style: pw.TextStyle(
+                          fontSize: 16,
+                          fontWeight: pw.FontWeight.bold,
+                          color: PdfColor.fromHex('7A1321'),
+                        ),
+                      ),
+                      pw.Text(
+                        'ይፋዊ ሰነድ',
+                        style: pw.TextStyle(
+                          fontSize: 11,
+                          color: PdfColor.fromHex('D4AF37'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            pw.Divider(color: PdfColor.fromHex('D4AF37'), thickness: 2),
+            pw.SizedBox(height: 12),
+            pw.Text(
+              title.isEmpty ? 'ይፋዊ ሰነድ' : title,
+              style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold),
+            ),
+            pw.SizedBox(height: 6),
+            pw.Text(
+              'ቀን፦ ${dateCtrl.text.trim()}    |    ${authorCtrl.text.trim()} (${authorRoleCtrl.text.trim()})',
+              style: const pw.TextStyle(fontSize: 11, color: PdfColors.grey700),
+            ),
+            pw.SizedBox(height: 14),
+            if (wordIntroCtrl.text.trim().isNotEmpty)
+              pw.Text(
+                wordIntroCtrl.text.trim(),
+                style: const pw.TextStyle(fontSize: 12),
+              ),
+            if (bodyLines.isNotEmpty) ...[
+              pw.SizedBox(height: 10),
+              ...bodyLines.map(
+                (l) => pw.Padding(
+                  padding: const pw.EdgeInsets.only(bottom: 6),
+                  child: pw.Text(l, style: const pw.TextStyle(fontSize: 12)),
+                ),
+              ),
+            ],
+            if (points.isNotEmpty) ...[
+              pw.SizedBox(height: 10),
+              ...points.map(
+                (p) => pw.Padding(
+                  padding: const pw.EdgeInsets.only(bottom: 4),
+                  child: pw.Row(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text('• ', style: const pw.TextStyle(fontSize: 12)),
+                      pw.Expanded(
+                        child: pw.Text(p, style: const pw.TextStyle(fontSize: 12)),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+            if (wordConclusionCtrl.text.trim().isNotEmpty) ...[
+              pw.SizedBox(height: 12),
+              pw.Text(
+                wordConclusionCtrl.text.trim(),
+                style: const pw.TextStyle(fontSize: 12),
+              ),
+            ],
+          ],
+        ),
+      );
+
+      final bytes = await doc.save();
+      final fileName = '${title.isEmpty ? 'ሰነድ' : title}.pdf';
+      await Printing.sharePdf(bytes: bytes, filename: fileName);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('PDF ማመንጨት አልተቻለም፦ $e'),
+            backgroundColor: AppTheme.redDanger,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => isGenerating = false);
+    }
+  }
+
   Future<void> _saveDocumentToArchive() async {
     setState(() => isSaving = true);
     try {
@@ -409,11 +544,7 @@ class _DocumentEditorScreenState extends State<DocumentEditorScreen>
                   ),
                   icon: const Icon(Icons.picture_as_pdf),
                   label: const Text('ወደ PDF አውጣ (Export PDF)'),
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('የ PDF ዝግጅት ተከናውኗል!'), backgroundColor: AppTheme.greenSuccess),
-                    );
-                  },
+                  onPressed: isGenerating ? null : _exportWordPdf,
                 ),
               ),
             ],

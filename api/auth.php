@@ -26,7 +26,7 @@ if ($action === 'login' && $method === 'POST') {
 
     // ተጠቃሚውን ከዳታቤዝ ብቻ መፈለግ (Auto-creation ሙሉ በሙሉ ተወግዷል!)
     $stmt = $pdo->prepare("
-        SELECT u.id, u.username, u.full_name, u.role_title, u.password_hash, u.status, u.phone, u.email,
+        SELECT u.id, u.username, u.full_name, u.role_title, u.role, u.password_hash, u.status, u.phone, u.email,
                u.must_change_password,
                d.id AS department_id, d.name AS department_name, d.short_name AS department_short_name, d.is_super_admin
         FROM users u
@@ -60,7 +60,8 @@ if ($action === 'login' && $method === 'POST') {
         'department_id' => $user['department_id'],
         'username' => $user['username'],
         'is_super_admin' => (bool)$user['is_super_admin'],
-        'role_title' => $user['role_title']
+        'role_title' => $user['role_title'],
+        'role' => $user['role'] ?? 'member'
     ];
     $token = createToken($tokenPayload, 86400 * 7); // ለ 7 ቀናት የሚሰራ
 
@@ -80,6 +81,8 @@ if ($action === 'login' && $method === 'POST') {
             'department_name' => $user['department_name'],
             'department_short_name' => $user['department_short_name'],
             'is_super_admin' => (bool)$user['is_super_admin'],
+            'role' => $user['role'] ?? 'member',
+            'is_dept_admin' => (($user['role'] ?? '') === 'dept_admin'),
             // Audit fix 2026-11-25: seed passwords must be changed on
             // first login — the app shows the change screen when true.
             'must_change_password' => (bool)($user['must_change_password'] ?? 0)

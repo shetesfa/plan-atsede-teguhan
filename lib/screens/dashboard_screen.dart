@@ -7,6 +7,7 @@ import '../widgets/telegram_connect_dialog.dart';
 import '../theme/app_theme.dart';
 import 'document_editor_screen.dart';
 import 'change_password_screen.dart';
+import 'user_management_screen.dart';
 
 class DashboardScreen extends StatelessWidget {
   final List<PlanItem> plans;
@@ -458,6 +459,74 @@ class DashboardScreen extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 18),
+
+            // 👥 ተጠቃሚዎች አስተዳደር — ለጽ/ቤት (Super Admin) ብቻ (2026-11-26)
+            if (isSuper) ...[
+              InkWell(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (ctx) => const UserManagementScreen(),
+                    ),
+                  );
+                },
+                borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppTheme.borderLight),
+                    boxShadow: AppTheme.cardShadow,
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryMaroon.withOpacity(0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.people_rounded,
+                          color: AppTheme.primaryMaroon,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'ተጠቃሚዎች አስተዳደር',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                              ),
+                            ),
+                            SizedBox(height: 2),
+                            Text(
+                              'አዲስ user ጨምር • password reset • user ማሰናከል',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: AppTheme.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(
+                        Icons.chevron_right_rounded,
+                        color: AppTheme.textMuted,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+            ],
 
             // 🚨 3. የማሳወቂያ ማጠቃለያ ባነር
             InkWell(

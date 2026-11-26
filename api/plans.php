@@ -345,13 +345,26 @@ if ($method === 'PUT') {
     jsonResponse(['message' => 'የዕቅዱ ክንውን ተሻሽሏል', 'id' => $id]);
 }
 
-// 4. እቅድ መሰረዝ (DELETE Plan — ፅ/ቤት ብቻ ነው መሰረዝ የሚችለው!)
+// 4. እቅድ መሰረዝ (DELETE Plan — ፅ/ቤት መሰረዝ ይችላል፤ dept_admin የራሱን
+// ክፍል እቅድ ብቻ መሰረዝ ይችላል — 2026-11-26)
 if ($method === 'DELETE') {
-    requireSuperAdmin($auth);
     $id = $_GET['id'] ?? (getJsonInput()['id'] ?? null);
 
     if (empty($id)) {
         jsonError('የዕቅድ መለያ (ID) ያስፈልጋል', 400);
+    }
+
+    $planStmt = $pdo->prepare("SELECT department_id FROM plans WHERE id = ? AND (is_deleted = 0 OR is_deleted IS NULL) LIMIT 1");
+    $planStmt->execute([$id]);
+    $planRow = $planStmt->fetch();
+    if (!$planRow) {
+        jsonError('ዕቅዱ አልተገኘም', 404);
+    }
+
+    $canDelete = !empty($auth['is_super_admin'])
+        || (!empty($auth['is_dept_admin']) && $auth['department_id'] === $planRow['department_id']);
+    if (!$canDelete) {
+        jsonError('ይህንን እቅድ ለመሰረዝ ፈቃድ የለዎትም — የራስዎ ክፍል እቅድ ብቻ መሰረዝ ይችላሉ (Forbidden).', 403);
     }
 
     $stmt = $pdo->prepare("UPDATE plans SET is_deleted = 1, version = version + 1 WHERE id = ?");
