@@ -1,6 +1,6 @@
 <?php
 // ============================================================
-// የአጸደ ትጉሃን ማሳሰቢያ መርሐግብር ኤፒአይ (Reminder Scheduler API)
+// የዐጸደ ትጉሃን ማሳሰቢያ መርሐግብር ኤፒአይ (Reminder Scheduler API)
 // Server-to-server only: the Telegram bot calls this endpoint
 // to learn which plans are due soon or overdue without a report,
 // then sends the Telegram reminders. It is NOT a user endpoint.

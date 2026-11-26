@@ -58,7 +58,7 @@ class _LetterGeneratorScreenState extends State<LetterGeneratorScreen> {
       );
 
       final pdfBytes = await PdfGeneratorService.generateLetterPdf(letter);
-      await PdfGeneratorService.printOrSharePdf(pdfBytes, 'አጸደ_ትጉሃን_ደብዳቤ.pdf');
+      await PdfGeneratorService.printOrSharePdf(pdfBytes, 'ዐጸደ_ትጉሃን_ደብዳቤ.pdf');
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -177,7 +177,7 @@ class _LetterGeneratorScreenState extends State<LetterGeneratorScreen> {
                     SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        'በዚህ ቅጽ የሞሉት ደብዳቤ በቀጥታ የአጸደ ትጉሃን አርማ እና ፎርማት ተካቶበት ወደ ይፋዊ PDF ይቀየራል።',
+                        'በዚህ ቅጽ የሞሉት ደብዳቤ በቀጥታ የዐጸደ ትጉሃን አርማ እና ፎርማት ተካቶበት ወደ ይፋዊ PDF ይቀየራል።',
                         style: TextStyle(fontSize: 12, color: AppTheme.primaryMaroon),
                       ),
                     ),

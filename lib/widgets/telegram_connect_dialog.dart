@@ -82,7 +82,7 @@ class _TelegramConnectDialogState extends State<TelegramConnectDialog> {
 
     // የሙከራ መልእክት መላክ
     final success = await TelegramService.sendMessage(
-      text: '<b>✅ የአጸደ ትጉሃን ሰንበት ት/ቤት መተግበሪያ</b>\n\nየቴሌግራም ግንኙነት በተሳካ ሁኔታ ተመስርቷል! ከዚህ በኋላ ይፋዊ ደብዳቤዎች እና ሪፖርቶች እዚህ ይደርሳሉ።',
+      text: '<b>✅ የዐጸደ ትጉሃን ሰንበት ት/ቤት መተግበሪያ</b>\n\nየቴሌግራም ግንኙነት በተሳካ ሁኔታ ተመስርቷል! ከዚህ በኋላ ይፋዊ ደብዳቤዎች እና ሪፖርቶች እዚህ ይደርሳሉ።',
     );
 
     if (mounted) {

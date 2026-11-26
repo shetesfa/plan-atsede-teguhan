@@ -75,7 +75,7 @@ class NotificationService extends ChangeNotifier {
       AndroidNotificationDetails(
     'atsede_plans',
     'የእቅድ ማሳሰቢያዎች',
-    channelDescription: 'የአጸደ ትጉሃን እቅድ ማሳሰቢያዎች',
+    channelDescription: 'የዐጸደ ትጉሃን እቅድ ማሳሰቢያዎች',
     importance: Importance.high,
     priority: Priority.high,
   );

@@ -55,7 +55,7 @@ class AtsedeTeguhanApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'ዓጸደ ትጉሃን ሰንበት ትምህርት ቤት',
+      title: 'ዐጸደ ትጉሃን ሰንበት ትምህርት ቤት',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       // Adaptive shell: on wide screens (desktop web, tablets, large

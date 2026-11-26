@@ -1,6 +1,6 @@
 <?php
 // ============================================================
-// የአጸደ ትጉሃን እቅድ ማስገቢያ ኤፒአይ (Plan Import API)
+// የዐጸደ ትጉሃን እቅድ ማስገቢያ ኤፒአይ (Plan Import API)
 // Server-to-server only: imports plan rows (e.g. from the 2019
 // Excel) into the ONLINE database. The app never stores plans
 // locally — this endpoint is the way Excel plans reach the

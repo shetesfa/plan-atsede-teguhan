@@ -19,7 +19,7 @@ class _DocumentEditorScreenState extends State<DocumentEditorScreen> {
   bool isChurchMode = true; // ነባሪው ይፋዊ ሰንበት ት/ቤት ነው
 
   // አጠቃላይ መረጃ
-  final orgOrHeaderCtrl = TextEditingController(text: 'ዓጸደ ትጉሃን ሰንበት ትምህርት ቤት');
+  final orgOrHeaderCtrl = TextEditingController(text: 'ዐጸደ ትጉሃን ሰንበት ትምህርት ቤት');
   String selectedDept = 'ትምህርት እና ስልጠና ክፍል';
   final dateCtrl = TextEditingController(text: '14/02/2019 ዓ.ም');
   final authorCtrl = TextEditingController(text: 'ተስፋሁን ባይህ');

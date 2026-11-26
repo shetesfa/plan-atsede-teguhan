@@ -104,7 +104,7 @@ class _ProposalGeneratorScreenState extends State<ProposalGeneratorScreen> {
       );
 
       final pdfBytes = await PdfGeneratorService.generateProposalPdf(proposal);
-      await PdfGeneratorService.printOrSharePdf(pdfBytes, 'አጸደ_ትጉሃን_ፕሮፖዛል.pdf');
+      await PdfGeneratorService.printOrSharePdf(pdfBytes, 'ዐጸደ_ትጉሃን_ፕሮፖዛል.pdf');
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -219,7 +219,7 @@ class _ProposalGeneratorScreenState extends State<ProposalGeneratorScreen> {
                     SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        'ለበዓላት፣ ለጉዞዎች ወይም ለስልጠናዎች የሚሆን ይፋዊ ፕሮፖዛል በበጀት ሰንጠረዥ እና በአጸደ ትጉሃን አርማ ወደ PDF ያዘጋጁ።',
+                        'ለበዓላት፣ ለጉዞዎች ወይም ለስልጠናዎች የሚሆን ይፋዊ ፕሮፖዛል በበጀት ሰንጠረዥ እና በዐጸደ ትጉሃን አርማ ወደ PDF ያዘጋጁ።',
                         style: TextStyle(fontSize: 12, color: AppTheme.primaryMaroon),
                       ),
                     ),

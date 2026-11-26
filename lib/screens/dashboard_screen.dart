@@ -371,7 +371,7 @@ class DashboardScreen extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          currentDept?.name ?? 'አጸደ ትጉሃን ሰንበት ት/ቤት',
+                          currentDept?.name ?? 'ዐጸደ ትጉሃን ሰንበት ት/ቤት',
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 16,

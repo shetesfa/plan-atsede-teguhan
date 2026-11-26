@@ -49,7 +49,7 @@ class PdfGeneratorService {
                       crossAxisAlignment: pw.CrossAxisAlignment.start,
                       children: [
                         pw.Text(
-                          'አጸደ ትጉሃን ሰንበት ትምህርት ቤት',
+                          'ዐጸደ ትጉሃን ሰንበት ትምህርት ቤት',
                           style: pw.TextStyle(
                             fontSize: 18,
                             fontWeight: pw.FontWeight.bold,
@@ -208,7 +208,7 @@ class PdfGeneratorService {
                     crossAxisAlignment: pw.CrossAxisAlignment.start,
                     children: [
                       pw.Text(
-                        'አጸደ ትጉሃን ሰንበት ትምህርት ቤት',
+                        'ዐጸደ ትጉሃን ሰንበት ትምህርት ቤት',
                         style: pw.TextStyle(
                           fontSize: 17,
                           fontWeight: pw.FontWeight.bold,
@@ -418,7 +418,7 @@ class PdfGeneratorService {
                         crossAxisAlignment: pw.CrossAxisAlignment.start,
                         children: [
                           pw.Text(
-                            'አጸደ ትጉሃን ሰንበት ትምህርት ቤት',
+                            'ዐጸደ ትጉሃን ሰንበት ትምህርት ቤት',
                             style: pw.TextStyle(
                               fontSize: 17,
                               fontWeight: pw.FontWeight.bold,
@@ -611,7 +611,7 @@ class PdfGeneratorService {
                       crossAxisAlignment: pw.CrossAxisAlignment.start,
                       children: [
                         pw.Text(
-                          'አጸደ ትጉሃን ሰንበት ትምህርት ቤት - ጽ/ቤት',
+                          'ዐጸደ ትጉሃን ሰንበት ትምህርት ቤት - ጽ/ቤት',
                           style: pw.TextStyle(
                             fontSize: 16,
                             fontWeight: pw.FontWeight.bold,
