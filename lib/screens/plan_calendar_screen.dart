@@ -445,6 +445,7 @@ class _PlanCalendarScreenState extends State<PlanCalendarScreen> {
                                   progressPercent: currentPercent,
                                   doneDetails: doneDetails,
                                   notDoneDetails: notDoneDetails.isEmpty ? null : notDoneDetails,
+                                  reportId: result['data']?['id']?.toString(),
                                 );
 
                                 if (context.mounted) {

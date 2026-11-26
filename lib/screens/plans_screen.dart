@@ -716,6 +716,7 @@ class _PlansScreenState extends State<PlansScreen> {
                                     progressPercent: currentPercent,
                                     doneDetails: doneDetails,
                                     notDoneDetails: notDoneDetails.isEmpty ? null : notDoneDetails,
+                                    reportId: result['data']?['id']?.toString(),
                                   );
 
                                   // H1(d)፦ የተያያዘ ፎቶ ካለ የመጀመሪያው ፎቶ

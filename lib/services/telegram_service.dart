@@ -494,6 +494,9 @@ class TelegramService {
   }
 
   /// የእቅድ ክንውን ሪፖርት ማሳወቂያ በቀጥታ ወደ ቴሌግራም ግሩፕ መላክ
+  /// (PR #31)፦ reportId ሲሰጥ፣ ማሳወቂያው መጀመሪያ በ bot server
+  /// /api/send_notice በኩል ይላካል (የሪፖርት መታወቂያው እንዲታወቅ)፤
+  /// ካልተሳካ ወደ መደበኛው sendMessage መንገድ ይመለሳል።
   static Future<bool> sendPlanReportNotice({
     required String deptName,
     required String senderTitle,
@@ -501,6 +504,7 @@ class TelegramService {
     required int progressPercent,
     required String doneDetails,
     String? notDoneDetails,
+    String? reportId,
   }) async {
     final statusEmoji = progressPercent == 100
         ? '✅ ተጠናቋል (100%)'
@@ -531,6 +535,27 @@ class TelegramService {
     final now = DateTime.now();
     final dateStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
     buffer.writeln('📅 <i>ሪፖርት የተላከበት ሰዓት፦ $dateStr</i>');
+
+    // PR #31፦ reportId ሲኖር፣ በ bot server /api/send_notice በኩል
+    // ከሪፖርት መታወቂያ ጋር መላክ ይሞከራል፤ ካልተሳካ ወደ sendMessage ይመለሳል።
+    if (reportId != null && savedChatId != null && savedChatId!.isNotEmpty && botToken.isNotEmpty) {
+      try {
+        final noticeUri = Uri.parse('$cloudBackendUrl/api/send_notice');
+        final response = await http.post(
+          noticeUri,
+          headers: _proxyHeaders(),
+          body: jsonEncode({
+            'message': buffer.toString(),
+            'chat_id': savedChatId,
+            'report_id': reportId,
+          }),
+        ).timeout(const Duration(seconds: 10));
+        final data = jsonDecode(response.body);
+        if (data['ok'] == true) return true;
+      } catch (e) {
+        debugPrint('send_notice with report_id failed, falling back: $e');
+      }
+    }
 
     return await sendMessage(text: buffer.toString());
   }

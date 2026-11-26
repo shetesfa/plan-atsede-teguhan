@@ -169,4 +169,125 @@ if ($action === 'change_password' && $method === 'POST') {
     jsonResponse(['message' => 'የይለፍ ቃልዎ በተሳካ ሁኔታ ተቀይሯል!']);
 }
 
+// 5. Telegram ማገናኘት — አንድ ጊዜ የሚሰራ 6 አሃዝ ኮድ መስጠት (Link code)
+// 2026-11-26 (bot upgrade): the app asks for a code, the user sends
+// /start <code> to the bot, the bot verifies it (bot.php link_verify).
+// The code itself is returned to the LOGGED-IN user only — it is
+// their own code, for their own account.
+if ($action === 'link_code' && $method === 'POST') {
+    $auth = requireAuth();
+    $userId = (int)$auth['user_id'];
+
+    // ሰዓት ውስጥ 5 ኮዶች ብቻ — ስፓም እንዳይሆን።
+    $countStmt = $pdo->prepare("SELECT COUNT(*) FROM telegram_link_codes WHERE user_id = ? AND created_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)");
+    $countStmt->execute([$userId]);
+    if ((int)$countStmt->fetchColumn() >= 5) {
+        jsonError('በጣም ብዙ ኮድ ጠይቀዋል — እባክዎ ከአንድ ሰዓት በኋላ ደግመው ይሞክሩ', 429);
+    }
+
+    $code = (string)random_int(100000, 999999);
+    $hash = hash('sha256', $code);
+    $expires = date('Y-m-d H:i:s', time() + 900); // 15 minutes
+    $pdo->prepare("UPDATE telegram_link_codes SET used_at = NOW() WHERE user_id = ? AND used_at IS NULL")->execute([$userId]);
+    $pdo->prepare("INSERT INTO telegram_link_codes (user_id, code_hash, expires_at) VALUES (?, ?, ?)")->execute([$userId, $hash, $expires]);
+
+    logAudit($pdo, 'telegram_link_code', 'users', (string)$userId, $userId, $auth['department_id'], []);
+    jsonResponse(['code' => $code, 'expires_in_seconds' => 900]);
+}
+
+// 6. Telegram የተገናኘበት ሁኔታ (Link status)
+if ($action === 'telegram_status' && $method === 'GET') {
+    $auth = requireAuth();
+    $stmt = $pdo->prepare("SELECT telegram_chat_id FROM users WHERE id = ? LIMIT 1");
+    $stmt->execute([(int)$auth['user_id']]);
+    $chatId = $stmt->fetchColumn();
+    jsonResponse([
+        'linked' => !empty($chatId),
+        'telegram_chat_id' => $chatId ?: null,
+    ]);
+}
+
+// 7. Telegram ማገናኘት ማቋረጥ (Unlink)
+if ($action === 'unlink_telegram' && $method === 'POST') {
+    $auth = requireAuth();
+    $pdo->prepare("UPDATE users SET telegram_chat_id = NULL WHERE id = ?")->execute([(int)$auth['user_id']]);
+    logAudit($pdo, 'telegram_unlink', 'users', (string)$auth['user_id'], (int)$auth['user_id'], $auth['department_id'], []);
+    jsonResponse(['linked' => false, 'message' => 'Telegram ማገናኘት ተቋርጧል']);
+}
+
+// 8. የይለፍ ቃል ዳግም ማስጀመር በኮድ — ከመግቢያ ገጹ "የይለፍ ቃል ረሳህ?"
+// (Password reset with a Telegram code — no login needed)
+// Flow: the user sends /reset to the bot, the bot sends a 6-digit
+// code to their LINKED Telegram chat, the user types the code + a
+// new password here. Rate-limited exactly like login (5 tries /
+// 15 min, keyed by IP + username). The code is compared by hash
+// server-side and never logged.
+if ($action === 'reset_with_code' && $method === 'POST') {
+    $input = getJsonInput();
+    $identifier = trim($input['username'] ?? $input['department_id'] ?? '');
+    $code = trim((string)($input['code'] ?? ''));
+    $newPass = (string)($input['new_password'] ?? '');
+
+    if ($identifier === '' || $code === '' || $newPass === '') {
+        jsonError('የተጠቃሚ ስም፣ ኮድ እና አዲስ የይለፍ ቃል ያስፈልጋሉ', 400);
+    }
+    if (strlen($newPass) < 8 || !preg_match('/[0-9]/', $newPass)) {
+        jsonError('አዲሱ የይለፍ ቃል ቢያንስ 8 ፊደላት እና ቢያንስ አንድ ቁጥር መያዝ አለበት።', 400);
+    }
+
+    $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+    $rateLimitKey = "reset_" . hash('sha256', $ip . '_' . strtolower($identifier));
+    checkRateLimit($pdo, $rateLimitKey, 5, 15);
+
+    $stmt = $pdo->prepare("
+        SELECT u.id, u.username, u.department_id
+        FROM users u
+        WHERE (u.username = ? OR u.department_id = ?)
+          AND u.status = 'active'
+    ");
+    $stmt->execute([$identifier, $identifier]);
+    $candidates = $stmt->fetchAll();
+
+    $userId = null;
+    $codeId = null;
+    $codeHash = hash('sha256', $code);
+    foreach ($candidates as $candidate) {
+        $cStmt = $pdo->prepare("
+            SELECT id FROM password_reset_codes
+            WHERE user_id = ? AND code_hash = ? AND used_at IS NULL AND expires_at > NOW()
+            ORDER BY created_at DESC LIMIT 1
+        ");
+        $cStmt->execute([(int)$candidate['id'], $codeHash]);
+        $found = $cStmt->fetch();
+        if ($found) {
+            $userId = (int)$candidate['id'];
+            $codeId = (int)$found['id'];
+            break;
+        }
+    }
+
+    if ($userId === null) {
+        recordFailedLoginAttempt($pdo, $rateLimitKey);
+        jsonError('ኮዱ የተሳሳተ ነው ወይም ጊዜው አልፏል — በቴሌግራም /reset ብለው አዲስ ኮድ ይጠይቁ', 400);
+    }
+
+    $newHash = password_hash($newPass, PASSWORD_BCRYPT, ['cost' => 12]);
+    $pdo->beginTransaction();
+    try {
+        // Password change bumps token_version — every token issued
+        // before this reset stops working immediately.
+        $pdo->prepare("UPDATE users SET password_hash = ?, must_change_password = 0, token_version = token_version + 1 WHERE id = ?")->execute([$newHash, $userId]);
+        $pdo->prepare("UPDATE password_reset_codes SET used_at = NOW() WHERE id = ?")->execute([$codeId]);
+        $pdo->commit();
+    } catch (Exception $e) {
+        $pdo->rollBack();
+        error_log('reset_with_code error: ' . $e->getMessage());
+        jsonError('የይለፍ ቃል መቀየር አልተቻለም — እባክዎ እንደገና ይሞክሩ', 500);
+    }
+
+    clearRateLimit($pdo, $rateLimitKey);
+    logAudit($pdo, 'telegram_password_reset', 'users', (string)$userId, $userId, null, []);
+    jsonResponse(['message' => 'የይለፍ ቃልዎ በተሳካ ሁኔታ ተቀይሯል! በአዲሱ ይግቡ።']);
+}
+
 jsonError('ያልታወቀ ጥያቄ ወይም ዘዴ', 404);
