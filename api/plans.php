@@ -34,8 +34,11 @@ if ($method === 'GET') {
             jsonError('እቅዱ አልተገኘም', 404);
         }
 
-        // የክፍል ፈቃድ ማረጋገጫ (አስተዳዳሪ ካልሆነ የሌላ ክፍልን የግል እቅድ ማየት አይችልም)
-        requireDepartmentOrAdmin($auth, $plan['department_id']);
+        // የክፍል ፈቃድ ማረጋገጫ (አስተዳዳሪ ወይም ቁጥጥር/can_view_all ካልሆነ
+        // የሌላ ክፍልን የግል እቅድ ማየት አይችልም — 2026-11-26)
+        if (empty($auth['is_super_admin']) && empty($auth['can_view_all']) && $auth['department_id'] !== $plan['department_id']) {
+            jsonError('የሌላ ክፍልን መረጃ የማየት ወይም የማሻሻል ፈቃድ የለዎትም (Forbidden).', 403);
+        }
         // The date is ALWAYS parsed fresh from the text: the stored
         // due_date was computed by an older parser (first-date rule)
         // and is stale for multi-window plans. Stored value is only
@@ -54,8 +57,9 @@ if ($method === 'GET') {
     ";
     $params = [];
 
-    // አስተዳዳሪ ካልሆነ የራሱን ክፍል እቅዶች ብቻ ነው ማየት የሚችለው
-    if (!$auth['is_super_admin']) {
+    // አስተዳዳሪ ወይም ቁጥጥር (can_view_all — ማየት ብቻ) ካልሆነ የራሱን ክፍል
+    // እቅዶች ብቻ ነው ማየት የሚችለው — 2026-11-26
+    if (empty($auth['is_super_admin']) && empty($auth['can_view_all'])) {
         if (!empty($requestedDept) && $requestedDept !== 'all' && $requestedDept !== $auth['department_id']) {
             jsonError('የተከለከለ ክንውን! የሌላ ክፍልን እቅዶች የመጠየቅ ፈቃድ የለዎትም (Forbidden).', 403);
         }

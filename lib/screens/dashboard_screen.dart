@@ -237,8 +237,11 @@ class DashboardScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final currentDept = AuthService.currentDepartment;
     final isSuper = AuthService.isSuperAdmin;
+    // 2026-11-26: the control department (can_view_all) sees all
+    // departments' plans here too — view-only, like the office.
+    final canViewAll = isSuper || AuthService.canViewAll;
 
-    final visiblePlans = isSuper
+    final visiblePlans = canViewAll
         ? plans
         : plans
             .where((p) =>

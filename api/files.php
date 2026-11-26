@@ -88,8 +88,10 @@ if (!$filePath) {
     jsonError('ፋይሉ አልተገኘም ወይም ተሰርዟል', 404);
 }
 
-// 4. የክፍል ባለቤትነት ፈቃድ ማረጋገጥ (RBAC Protection)
-if (!$isChatAttachment && !$auth['is_super_admin'] && $fileDept !== $auth['department_id'] && $fileDept !== 'all') {
+// 4. የክፍል ባለቤትነት ፈቃድ ማረጋገጥ (RBAC Protection — 2026-11-26:
+// the control department (can_view_all) may also download any
+// department's report attachments, view-only like the office).
+if (!$isChatAttachment && !$auth['is_super_admin'] && empty($auth['can_view_all']) && $fileDept !== $auth['department_id'] && $fileDept !== 'all') {
     jsonError('የተከለከለ ክንውን! የሌላ ክፍልን የግል ፋይል የማውረድ ፈቃድ የለዎትም (Forbidden).', 403);
 }
 

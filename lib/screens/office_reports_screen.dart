@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:printing/printing.dart';
 import '../models/department.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import '../services/office_export_service.dart';
 import '../theme/app_theme.dart';
 import '../utils/ethiopian_date_display.dart';
 
@@ -34,6 +36,91 @@ class _OfficeReportsScreenState extends State<OfficeReportsScreen> {
       reports = data;
       isLoading = false;
     });
+  }
+
+  // ── 2026-11-26: report attachment open/download ─────────────────────
+  // files.php serves the file by attachment id (auth-guarded: own
+  // department, super admin, or can_view_all). Images preview in-app,
+  // PDFs open in the share sheet, Word/Excel files are saved to the
+  // device documents folder (web cannot save — the app is needed).
+  Future<void> _openAttachment(Map<String, dynamic> att) async {
+    final id = (att['id'] ?? '').toString();
+    final name = (att['file_name'] ?? 'ፋይል').toString();
+    final mime = (att['file_type'] ?? '').toString();
+    if (id.isEmpty) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      const SnackBar(content: Text('ፋይሉ እየወረደ ነው…'), duration: Duration(seconds: 2)),
+    );
+    final bytes = await ApiService().downloadAttachment(id);
+    if (!mounted) return;
+    if (bytes == null) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('ፋይሉን ማውረድ አልተቻለም — ኢንተርኔትዎን ያረጋግጡ።'),
+          backgroundColor: AppTheme.redDanger,
+        ),
+      );
+      return;
+    }
+
+    if (mime.startsWith('image/')) {
+      await showDialog(
+        context: context,
+        builder: (ctx) => Dialog(
+          insetPadding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14), overflow: TextOverflow.ellipsis),
+                    ),
+                    IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx)),
+                  ],
+                ),
+              ),
+              Flexible(child: SingleChildScrollView(child: Image.memory(bytes))),
+              const SizedBox(height: 12),
+            ],
+          ),
+        ),
+      );
+      return;
+    }
+
+    if (mime == 'application/pdf') {
+      try {
+        await Printing.sharePdf(bytes: bytes, filename: name);
+      } catch (e) {
+        if (mounted) {
+          messenger.showSnackBar(
+            SnackBar(content: Text('ፋይሉን መክፈት አልተቻለም፦ $e'), backgroundColor: AppTheme.redDanger),
+          );
+        }
+      }
+      return;
+    }
+
+    // Word/Excel ሰነዶች — ወደ መሳሪያው ሰነዶች ማውጫ ማስቀመጥ
+    final path = await OfficeExportService.saveAndGetFilePath(fileName: name, bytes: bytes);
+    if (!mounted) return;
+    if (path != null) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('ፋይሉ ተወርዷል፦ $name'), backgroundColor: AppTheme.greenSuccess),
+      );
+    } else {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('በድረ-ገጽ ላይ ይህን ፋይል ማውረድ አይቻልም — እባክዎ በአንድሮይድ አፕሊኬሽኑ ይክፈቱ።'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+    }
   }
 
   void _showReviewDialog(Map<String, dynamic> report) {
@@ -303,6 +390,31 @@ class _OfficeReportsScreenState extends State<OfficeReportsScreen> {
                                     overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(fontSize: 13),
                                   ),
+                                  // 2026-11-26: attached files — tap to open/download.
+                                  if (r['attachments'] is List && (r['attachments'] as List).isNotEmpty) ...[
+                                    const SizedBox(height: 10),
+                                    const Text('ተያይዘው የቀረቡ ፋይሎች፦', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                                    const SizedBox(height: 6),
+                                    Wrap(
+                                      spacing: 6,
+                                      runSpacing: 6,
+                                      children: (r['attachments'] as List).map((a) {
+                                        final att = Map<String, dynamic>.from(a as Map);
+                                        final fileName = (att['file_name'] ?? 'ፋይል').toString();
+                                        final fileSize = att['file_size'] is int
+                                            ? att['file_size'] as int
+                                            : int.tryParse('${att['file_size'] ?? 0}') ?? 0;
+                                        return ActionChip(
+                                          avatar: Icon(_attachmentIcon(att), size: 16, color: AppTheme.primaryMaroon),
+                                          label: Text(
+                                            '$fileName (${_formatFileSize(fileSize)})',
+                                            style: const TextStyle(fontSize: 11),
+                                          ),
+                                          onPressed: () => _openAttachment(att),
+                                        );
+                                      }).toList(),
+                                    ),
+                                  ],
                                   if (r['office_feedback'] != null && r['office_feedback'].toString().isNotEmpty) ...[
                                     const SizedBox(height: 8),
                                     Container(
@@ -351,4 +463,22 @@ class _OfficeReportsScreenState extends State<OfficeReportsScreen> {
       ),
     );
   }
+}
+
+/// 2026-11-26: icon for a report attachment, by its MIME type.
+IconData _attachmentIcon(Map<String, dynamic> att) {
+  final mime = (att['file_type'] ?? '').toString();
+  if (mime.startsWith('image/')) return Icons.image;
+  if (mime == 'application/pdf') return Icons.picture_as_pdf;
+  if (mime.contains('spreadsheet') || mime.contains('ms-excel')) return Icons.table_chart;
+  if (mime.contains('word') || mime.contains('msword')) return Icons.description;
+  return Icons.insert_drive_file;
+}
+
+/// 2026-11-26: human-readable file size (KB/MB).
+String _formatFileSize(int bytes) {
+  if (bytes < 1024) return '$bytes B';
+  final kb = bytes / 1024;
+  if (kb < 1024) return '${kb.toStringAsFixed(0)} KB';
+  return '${(kb / 1024).toStringAsFixed(1)} MB';
 }

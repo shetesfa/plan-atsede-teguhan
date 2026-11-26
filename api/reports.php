@@ -18,14 +18,17 @@ if ($method === 'GET') {
             jsonError('የሪፖርት መለያ (report_id) ያስፈልጋል', 400);
         }
 
-        // የሪፖርቱን ክፍል መፈተሽ
+        // የሪፖርቱን ክፍል መፈተሽ (አስተዳዳሪ ወይም ቁጥጥር/can_view_all
+        // ካልሆነ የሌላ ክፍልን ሪፖርት ማየት አይችልም — 2026-11-26)
         $repCheck = $pdo->prepare("SELECT department_id FROM reports WHERE id = ?");
         $repCheck->execute([$reportId]);
         $repDept = $repCheck->fetchColumn();
         if (!$repDept) {
             jsonError('ሪፖርቱ አልተገኘም', 404);
         }
-        requireDepartmentOrAdmin($auth, $repDept);
+        if (empty($auth['is_super_admin']) && empty($auth['can_view_all']) && $auth['department_id'] !== $repDept) {
+            jsonError('የሌላ ክፍልን መረጃ የማየት ወይም የማሻሻል ፈቃድ የለዎትም (Forbidden).', 403);
+        }
 
         $stmt = $pdo->prepare("SELECT * FROM report_reviews WHERE report_id = ? ORDER BY created_at ASC");
         $stmt->execute([$reportId]);
@@ -52,7 +55,11 @@ if ($method === 'GET') {
             jsonError('ሪፖርቱ አልተገኘም', 404);
         }
 
-        requireDepartmentOrAdmin($auth, $report['department_id']);
+        // አስተዳዳሪ ወይም ቁጥጥር/can_view_all ካልሆነ የሌላ ክፍልን ሪፖርት
+        // ማየት አይችልም — 2026-11-26
+        if (empty($auth['is_super_admin']) && empty($auth['can_view_all']) && $auth['department_id'] !== $report['department_id']) {
+            jsonError('የሌላ ክፍልን መረጃ የማየት ወይም የማሻሻል ፈቃድ የለዎትም (Forbidden).', 403);
+        }
 
         $attStmt = $pdo->prepare("SELECT id, file_name, file_path, file_type, file_size FROM report_attachments WHERE report_id = ?");
         $attStmt->execute([$id]);
@@ -70,8 +77,9 @@ if ($method === 'GET') {
     ";
     $params = [];
 
-    // አስተዳዳሪ ካልሆነ የራሱን ክፍል ሪፖርቶች ብቻ ያያል
-    if (!$auth['is_super_admin']) {
+    // አስተዳዳሪ ወይም ቁጥጥር (can_view_all — ማየት ብቻ) ካልሆነ የራሱን
+    // ክፍል ሪፖርቶች ብቻ ያያል — 2026-11-26
+    if (empty($auth['is_super_admin']) && empty($auth['can_view_all'])) {
         $filterDept = $_GET['dept'] ?? null;
         if (!empty($filterDept) && $filterDept !== 'all' && $filterDept !== $auth['department_id']) {
             jsonError('የተከለከለ ክንውን! የሌላ ክፍልን ሪፖርቶች የመጠየቅ ፈቃድ የለዎትም (Forbidden).', 403);
@@ -208,12 +216,17 @@ if ($method === 'POST' && $action !== 'review') {
             mkdir($uploadDir, 0755, true);
         }
 
-        $allowedExtensions = ['jpg', 'jpeg', 'png', 'pdf', 'docx', 'xlsx'];
+        $allowedExtensions = ['jpg', 'jpeg', 'png', 'pdf', 'doc', 'docx', 'xls', 'xlsx'];
         $allowedMimeTypes = [
             'image/jpeg', 'image/png', 'application/pdf',
+            'application/msword',
             'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'application/vnd.ms-excel',
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         ];
+        // 2026-11-26: all attachments in this request together (single +
+        // multi) must stay within 20MB in total.
+        $attachedBytesTotal = 0;
 
         // 1. Multipart ሰቀላ
         if (!empty($_FILES['attachment'])) {
@@ -241,6 +254,7 @@ if ($method === 'POST' && $action !== 'review') {
                     $relPath = 'api/uploads/' . $safeName;
                     $attStmt = $pdo->prepare("INSERT INTO report_attachments (id, report_id, file_name, file_path, file_type, file_size) VALUES (?, ?, ?, ?, ?, ?)");
                     $attStmt->execute([$attId, $reportId, htmlspecialchars($file['name'], ENT_QUOTES, 'UTF-8'), $relPath, $mime, $file['size']]);
+                    $attachedBytesTotal += (int)$file['size'];
                 }
             }
         }
@@ -283,6 +297,67 @@ if ($method === 'POST' && $action !== 'review') {
                     $relPath = 'api/uploads/' . $safeName;
                     $attStmt = $pdo->prepare("INSERT INTO report_attachments (id, report_id, file_name, file_path, file_type, file_size) VALUES (?, ?, ?, ?, ?, ?)");
                     $attStmt->execute([$attId, $reportId, htmlspecialchars($origName, ENT_QUOTES, 'UTF-8'), $relPath, $mime, strlen($fileData)]);
+                    $attachedBytesTotal += strlen($fileData);
+                }
+            }
+        }
+
+        // 3. ብዙ አባሪዎች (Multi-attachments — 2026-11-26): the app sends an
+        // `attachments` array of {name, mime, data (base64)}. Each file
+        // is stored in report_attachments like the single-attachment
+        // paths above. Per-file limit 10MB, total limit 20MB (counting
+        // any single attachment stored above in this same request).
+        if (!empty($input['attachments']) && is_array($input['attachments'])) {
+            foreach ($input['attachments'] as $att) {
+                $origName = trim($att['name'] ?? '');
+                if ($origName === '' || empty($att['data'])) {
+                    continue;
+                }
+                $ext = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
+
+                if (!in_array($ext, $allowedExtensions, true)) {
+                    $pdo->rollBack();
+                    jsonError('የተከለከለ የፋይል ቅጥያ፦ ' . $origName . '። የተፈቀዱት፦ JPG, PNG, PDF, DOC, DOCX, XLS, XLSX ብቻ ናቸው።', 400);
+                }
+
+                $base64Data = $att['data'];
+                if (str_contains($base64Data, ',')) {
+                    $base64Data = explode(',', $base64Data)[1];
+                }
+                $fileData = base64_decode($base64Data, true);
+
+                if ($fileData === false) {
+                    $pdo->rollBack();
+                    jsonError('የፋይል መረጃውን ማንበብ አልተቻለም፦ ' . $origName, 400);
+                }
+
+                $fileSize = strlen($fileData);
+                if ($fileSize > 10485760) {
+                    $pdo->rollBack();
+                    jsonError('የፋይል መጠኑ ከ 10MB መብለጥ የለበትም፦ ' . $origName, 400);
+                }
+                if ($attachedBytesTotal + $fileSize > 20971520) {
+                    $pdo->rollBack();
+                    jsonError('የአባሪዎች ጠቅላላ መጠን ከ 20MB መብለጥ የለበትም። እባክዎ አንዳንድ ፋይሎችን ያስወግዱ።', 400);
+                }
+
+                $finfo = finfo_open(FILEINFO_MIME_TYPE);
+                $mime = finfo_buffer($finfo, $fileData);
+                finfo_close($finfo);
+
+                if (!in_array($mime, $allowedMimeTypes, true)) {
+                    $pdo->rollBack();
+                    jsonError('የተከለከለ የፋይል ይዘት (MIME type mismatch)፦ ' . $origName, 400);
+                }
+
+                $safeName = 'att_' . hash('sha256', uniqid() . microtime()) . '.' . $ext;
+                $targetPath = $uploadDir . $safeName;
+                if (file_put_contents($targetPath, $fileData)) {
+                    $attId = 'att_' . uniqid();
+                    $relPath = 'api/uploads/' . $safeName;
+                    $attStmt = $pdo->prepare("INSERT INTO report_attachments (id, report_id, file_name, file_path, file_type, file_size) VALUES (?, ?, ?, ?, ?, ?)");
+                    $attStmt->execute([$attId, $reportId, htmlspecialchars($origName, ENT_QUOTES, 'UTF-8'), $relPath, $mime, $fileSize]);
+                    $attachedBytesTotal += $fileSize;
                 }
             }
         }

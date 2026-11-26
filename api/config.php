@@ -247,7 +247,7 @@ function verifyToken(?string $token, ?PDO $pdo = null): ?array {
             try {
                 $uStmt = $pdo->prepare("
                     SELECT u.id, u.username, u.department_id, u.full_name, u.role_title, u.role, u.status,
-                           d.is_super_admin, d.name AS department_name
+                           d.is_super_admin, d.can_view_all, d.name AS department_name
                     FROM users u
                     LEFT JOIN departments d ON u.department_id = d.id
                     WHERE u.id = ? LIMIT 1
@@ -271,6 +271,10 @@ function verifyToken(?string $token, ?PDO $pdo = null): ?array {
                 $payload['role'] = $liveUser['role'] ?? 'member';
                 $payload['is_dept_admin'] = (($liveUser['role'] ?? '') === 'dept_admin');
                 $payload['is_super_admin'] = (bool)($liveUser['is_super_admin'] ?? false);
+                // 2026-11-26: control department sees all (view-only) —
+                // fresh from the DB on every request (never trust an old
+                // token for this).
+                $payload['can_view_all'] = (bool)($liveUser['can_view_all'] ?? false);
             } catch (\Exception $e) {
                 return null; // Fail-Closed
             }

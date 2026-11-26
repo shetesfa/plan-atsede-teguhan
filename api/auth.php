@@ -28,7 +28,7 @@ if ($action === 'login' && $method === 'POST') {
     $stmt = $pdo->prepare("
         SELECT u.id, u.username, u.full_name, u.role_title, u.role, u.password_hash, u.status, u.phone, u.email,
                u.must_change_password,
-               d.id AS department_id, d.name AS department_name, d.short_name AS department_short_name, d.is_super_admin
+               d.id AS department_id, d.name AS department_name, d.short_name AS department_short_name, d.is_super_admin, d.can_view_all
         FROM users u
         JOIN departments d ON u.department_id = d.id
         WHERE (u.username = ? OR u.department_id = ?)
@@ -60,6 +60,8 @@ if ($action === 'login' && $method === 'POST') {
         'department_id' => $user['department_id'],
         'username' => $user['username'],
         'is_super_admin' => (bool)$user['is_super_admin'],
+        // 2026-11-26: control department sees all (view-only).
+        'can_view_all' => (bool)($user['can_view_all'] ?? false),
         'role_title' => $user['role_title'],
         'role' => $user['role'] ?? 'member'
     ];
@@ -81,6 +83,8 @@ if ($action === 'login' && $method === 'POST') {
             'department_name' => $user['department_name'],
             'department_short_name' => $user['department_short_name'],
             'is_super_admin' => (bool)$user['is_super_admin'],
+            // 2026-11-26: control department sees all (view-only).
+            'can_view_all' => (bool)($user['can_view_all'] ?? false),
             'role' => $user['role'] ?? 'member',
             'is_dept_admin' => (($user['role'] ?? '') === 'dept_admin'),
             // Audit fix 2026-11-25: seed passwords must be changed on
@@ -108,7 +112,7 @@ if ($action === 'me' && $method === 'GET') {
 
     $stmt = $pdo->prepare("
         SELECT u.id, u.username, u.full_name, u.role_title, u.phone, u.email, u.last_login, u.must_change_password,
-               d.id AS department_id, d.name AS department_name, d.short_name AS department_short_name, d.is_super_admin
+               d.id AS department_id, d.name AS department_name, d.short_name AS department_short_name, d.is_super_admin, d.can_view_all
         FROM users u
         JOIN departments d ON u.department_id = d.id
         WHERE u.id = ? AND u.status = 'active'
