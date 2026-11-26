@@ -25,6 +25,11 @@ if ($action === 'login' && $method === 'POST') {
     checkRateLimit($pdo, $rateLimitKey, 5, 15);
 
     // ተጠቃሚውን ከዳታቤዝ ብቻ መፈለግ (Auto-creation ሙሉ በሙሉ ተወግዷል!)
+    // 2026-11-26: አንድ ክፍል ብዙ ሰዎች ሊኖሩት ይችላል (ለምሳሌ ቁጥጥር 4 ሰዎች)።
+    // ስም አይጠየቅም — ክፍል + የይለፍ ቃል ብቻ ነው። የይለፍ ቃሉ የየትኛው ሰው እንደሆነ
+    // ይለያል፦ በክፍሉ ውስጥ ያሉትን ሁሉንም ንቁ ተጠቃሚዎች እንፈትሻለን፣ የይለፍ ቃሉ
+    // የሚዛመደው ሰው እንደገባ ይቆጠራል። (በአንድ ክፍል ውስጥ የሁለት ሰዎች የይለፍ
+    // ቃል አንድ መሆን የለበትም — አሁን ሁሉም የተለየ ነው።)
     $stmt = $pdo->prepare("
         SELECT u.id, u.username, u.full_name, u.role_title, u.role, u.password_hash, u.status, u.phone, u.email,
                u.must_change_password,
@@ -32,18 +37,21 @@ if ($action === 'login' && $method === 'POST') {
         FROM users u
         JOIN departments d ON u.department_id = d.id
         WHERE (u.username = ? OR u.department_id = ?)
-        LIMIT 1
+          AND u.status = 'active'
     ");
     $stmt->execute([$loginIdentifier, $loginIdentifier]);
-    $user = $stmt->fetch();
-
-    if (!$user || $user['status'] !== 'active') {
-        recordFailedLoginAttempt($pdo, $rateLimitKey);
-        jsonError('የተሳሳተ የተጠቃሚ ስም ወይም የይለፍ ቃል!', 401);
-    }
+    $candidates = $stmt->fetchAll();
 
     // የይለፍ ቃል በ Bcrypt ብቻ ማረጋገጥ (ምንም ደካማ ነባሪ የለም!)
-    if (!password_verify($password, $user['password_hash'])) {
+    $user = null;
+    foreach ($candidates as $candidate) {
+        if (password_verify($password, $candidate['password_hash'])) {
+            $user = $candidate;
+            break;
+        }
+    }
+
+    if (!$user) {
         recordFailedLoginAttempt($pdo, $rateLimitKey);
         jsonError('የተሳሳተ የተጠቃሚ ስም ወይም የይለፍ ቃል!', 401);
     }
