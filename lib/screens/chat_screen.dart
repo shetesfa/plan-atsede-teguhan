@@ -263,11 +263,16 @@ class _ChatScreenState extends State<ChatScreen> {
           ],
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.settings_outlined, color: Colors.white),
-            tooltip: 'የቴሌግራም ቅንብር',
-            onPressed: () => TelegramConnectDialog.show(context),
-          ),
+          // 2026-11-26 (M3): the bot token may only be changed by the
+          // office (super admin) and the education department — other
+          // users do not even see the Telegram settings button.
+          if (AuthService.isSuperAdmin ||
+              AuthService.currentDepartment?.id == 'education')
+            IconButton(
+              icon: const Icon(Icons.settings_outlined, color: Colors.white),
+              tooltip: 'የቴሌግራም ቅንብር',
+              onPressed: () => TelegramConnectDialog.show(context),
+            ),
         ],
       ),
       body: Column(

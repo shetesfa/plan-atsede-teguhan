@@ -169,7 +169,9 @@ if ($method === 'POST') {
             jsonError('አዲሱ የይለፍ ቃል ቢያንስ 8 ፊደላት እና ቢያንስ አንድ ቁጥር መያዝ አለበት።', 400);
         }
         $hash = password_hash($newPass, PASSWORD_BCRYPT, ['cost' => 12]);
-        $stmt = $pdo->prepare("UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?");
+        // 2026-11-26: bump token_version so every token issued before this
+        // reset stops working immediately.
+        $stmt = $pdo->prepare("UPDATE users SET password_hash = ?, must_change_password = 1, token_version = token_version + 1 WHERE id = ?");
         $stmt->execute([$hash, $userId]);
         if ($stmt->rowCount() === 0) {
             jsonError('ተጠቃሚው አልተገኘም', 404);

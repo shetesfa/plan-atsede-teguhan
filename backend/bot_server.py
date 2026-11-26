@@ -149,6 +149,12 @@ def health():
 
 @app.route("/api/plans", methods=["GET"])
 def api_get_plans():
+    # 2026-11-26 (M2): the full plan list was public — anyone could read
+    # all 137 plans without any credential. Same proxy auth as the other
+    # endpoints (BOT_PROXY_SECRET header or Bearer BOT_TOKEN).
+    auth_error = require_proxy_auth()
+    if auth_error is not None:
+        return auth_error
     dept = request.args.get("dept")
     plans = get_plans_from_database(dept)
     return jsonify({"status": "success", "count": len(plans), "data": plans})

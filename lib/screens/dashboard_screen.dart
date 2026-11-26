@@ -298,11 +298,16 @@ class DashboardScreen extends StatelessWidget {
                 ),
             ],
           ),
-          IconButton(
-            icon: const Icon(Icons.telegram, color: Colors.white),
-            tooltip: 'የቴሌግራም ቦት ቅንብር',
-            onPressed: () => TelegramConnectDialog.show(context),
-          ),
+          // 2026-11-26 (M3): the bot token may only be changed by the
+          // office (super admin) and the education department — other
+          // users do not even see the Telegram settings button.
+          if (AuthService.isSuperAdmin ||
+              AuthService.currentDepartment?.id == 'education')
+            IconButton(
+              icon: const Icon(Icons.telegram, color: Colors.white),
+              tooltip: 'የቴሌግራም ቦት ቅንብር',
+              onPressed: () => TelegramConnectDialog.show(context),
+            ),
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: onRefresh,

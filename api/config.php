@@ -81,7 +81,7 @@ function jsonError(string $message, int $statusCode = 400, $errors = null): void
 // Audit M7: production web origin is allowed by default, and the list
 // can be overridden with the ALLOWED_ORIGINS env var (comma-separated).
 // Never put secrets here — origins only.
-$allowedOriginsStr = getenv('ALLOWED_ORIGINS') ?: 'http://localhost:3000,http://127.0.0.1:8000,http://localhost:8080,http://127.0.0.1:8080,http://localhost:8085,http://127.0.0.1:8085,http://localhost:5000,http://127.0.0.1:5000,http://127.0.0.1,https://plan-atsede-teguhan.onrender.com';
+$allowedOriginsStr = getenv('ALLOWED_ORIGINS') ?: 'http://localhost:3000,http://127.0.0.1:8000,http://localhost:8080,http://127.0.0.1:8080,http://localhost:8085,http://127.0.0.1:8085,http://localhost:5000,http://127.0.0.1:5000,http://127.0.0.1,https://plan-atsede-teguhan.onrender.com,https://shetesfa.github.io';
 $allowedOrigins = array_filter(array_map('trim', explode(',', $allowedOriginsStr)));
 
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
@@ -246,7 +246,7 @@ function verifyToken(?string $token, ?PDO $pdo = null): ?array {
         if ($userId) {
             try {
                 $uStmt = $pdo->prepare("
-                    SELECT u.id, u.username, u.department_id, u.full_name, u.role_title, u.role, u.status,
+                    SELECT u.id, u.username, u.department_id, u.full_name, u.role_title, u.role, u.status, u.token_version,
                            d.is_super_admin, d.can_view_all, d.name AS department_name
                     FROM users u
                     LEFT JOIN departments d ON u.department_id = d.id
@@ -257,6 +257,16 @@ function verifyToken(?string $token, ?PDO $pdo = null): ?array {
 
                 if (!$liveUser || ($liveUser['status'] ?? '') !== 'active') {
                     // ተጠቃሚው ታግዷል፣ ተሰርዟል ወይም ንቁ አይደለም
+                    return null;
+                }
+
+                // 2026-11-26: password change/reset bumps token_version —
+                // a token issued before the change is rejected here, even
+                // though its signature and expiry are still valid.
+                // Tokens issued before this column existed carry no version
+                // (treated as 0, the column default), so they keep working
+                // until the next password change.
+                if ((int)($payload['token_version'] ?? 0) !== (int)($liveUser['token_version'] ?? 0)) {
                     return null;
                 }
 
