@@ -428,18 +428,7 @@ class DocumentsHubScreen extends StatelessWidget {
               subtitle: 'ኮምፒውተር ሳይኖር በስልክዎ በቀላሉ የክንውን ሪፖርት፣ ቃለ-ጉባኤ እና ማስታወሻዎችን አዘጋጅተው ወደ PDF እና ቴሌግራም ያውጡ።',
               onTap: () => Navigator.push(
                 context,
-                MaterialPageRoute(builder: (ctx) => const DocumentEditorScreen(initialTabIndex: 0)),
-              ),
-            ),
-            _paperCard(
-              context: context,
-              icon: Icons.table_chart_rounded,
-              iconColor: const Color(0xFF217346),
-              title: 'Excel የሰንጠረዥና የበጀት ሰሪ',
-              subtitle: 'የእቃ፣ የስራና የወጪ ዝርዝር ሰንጠረዥ አዘጋጅተው ዋጋውን በራስ-ሰር (Auto-sum) አስልተው ወደ PDF ያውጡ።',
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (ctx) => const DocumentEditorScreen(initialTabIndex: 1)),
+                MaterialPageRoute(builder: (ctx) => const DocumentEditorScreen()),
               ),
             ),
             const SizedBox(height: 8),

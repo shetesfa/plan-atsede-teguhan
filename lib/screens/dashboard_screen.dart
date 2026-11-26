@@ -432,21 +432,7 @@ class DashboardScreen extends StatelessWidget {
                   onTap: () {
                     Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (ctx) => const DocumentEditorScreen(initialTabIndex: 0)),
-                    );
-                  },
-                ),
-                const SizedBox(width: 10),
-                _buildQuickAction(
-                  context,
-                  title: 'Excel ሰንጠረዥ',
-                  subtitle: 'በጀት/ሒሳብ',
-                  icon: Icons.table_chart_rounded,
-                  color: const Color(0xFF217346),
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (ctx) => const DocumentEditorScreen(initialTabIndex: 1)),
+                      MaterialPageRoute(builder: (ctx) => const DocumentEditorScreen()),
                     );
                   },
                 ),
