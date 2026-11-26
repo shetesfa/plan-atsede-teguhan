@@ -23,6 +23,14 @@ android {
         // Android refuses a release-signed update over it — so this build
         // installs as a new app under a new package name.
         applicationId = "com.atsedeteguhan.atsedeplan"
+        // 2026-11-26: arm64-only — the all-ABIs APK does not install on
+        // Tesfa's Galaxy A24 (Android 16), the arm64-only build does.
+        // (Gradle abiFilters alone did not shrink the APK — the Flutter
+        // plugin overrides it — so the workflow also builds with
+        // --target-platform android-arm64.)
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
