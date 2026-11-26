@@ -493,6 +493,14 @@ class TelegramService {
     _messageStreamController.add(List.unmodifiable(_cachedMessages));
   }
 
+  /// Optimistic መልዕክት መላክ ካልተሳካ ከዝርዝሩ ማስወገድ (2026-11-26:
+  /// a failed send must never look delivered — the message is only in
+  /// memory until the server confirms it).
+  static void removeLocalMessage(int messageId) {
+    _cachedMessages.removeWhere((m) => m.messageId == messageId);
+    _messageStreamController.add(List.unmodifiable(_cachedMessages));
+  }
+
   /// የእቅድ ክንውን ሪፖርት ማሳወቂያ በቀጥታ ወደ ቴሌግራም ግሩፕ መላክ
   /// (PR #31)፦ reportId ሲሰጥ፣ ማሳወቂያው መጀመሪያ በ bot server
   /// /api/send_notice በኩል ይላካል (የሪፖርት መታወቂያው እንዲታወቅ)፤

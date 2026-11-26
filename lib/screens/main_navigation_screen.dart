@@ -31,6 +31,10 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   List<UnplannedActivity> unplannedActivities = [];
   bool isLoading = true;
   String? _serverError;
+  // 2026-11-26: unplanned works load from the server — when the load
+  // fails the list stays EMPTY (no stale data) and this holds the error
+  // shown on the unplanned screen.
+  String? _unplannedError;
   String? selectedDeptForPlans;
   // ከመስመር ውጭ ሲሆን እቅዶቹ ከካሽ ይታያሉ — ማሳያው ይህን ያመለክታል።
   bool _isOffline = false;
@@ -64,6 +68,37 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
       await _loadFromCacheOrError(deptId, e.message);
     } catch (e) {
       await _loadFromCacheOrError(deptId, e.toString());
+    }
+    await _loadUnplannedActivities();
+  }
+
+  /// ያልታቀዱ ስራዎች ከሰርቨር ይጫናሉ (2026-11-26: server storage —
+  /// አካባቢው ብቻ ከሆነ app ሲዘጋ ይጠፋሉ, ስለዚህ ካሽ የለም። ካልተጫኑ
+  /// ዝርዝሩ ባዶ ሆኖ ይቀራል እና ስህተቱ ይታያል — ያረጀ መረጃ አይታይም።
+  Future<void> _loadUnplannedActivities() async {
+    try {
+      final remote = await ApiService().fetchUnplannedActivities();
+      final acts = remote.map((d) => UnplannedActivity.fromDbJson(d)).toList();
+      if (mounted) {
+        setState(() {
+          unplannedActivities = acts;
+          _unplannedError = null;
+        });
+      }
+    } on ApiException catch (e) {
+      if (mounted) {
+        setState(() {
+          unplannedActivities = [];
+          _unplannedError = e.message;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          unplannedActivities = [];
+          _unplannedError = e.toString();
+        });
+      }
     }
   }
 
@@ -141,16 +176,53 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
       MaterialPageRoute(
         builder: (ctx) => UnplannedActivitiesScreen(
           activities: unplannedActivities,
-          onAddActivity: (act) {
-            setState(() {
-              unplannedActivities.insert(0, act);
-            });
+          loadError: _unplannedError,
+          // 2026-11-26: server FIRST — the local list changes only after
+          // the server confirms the save. On failure the dialog stays
+          // open and the error is shown (the screen shows the message).
+          onAddActivity: (act, {String? evidenceBase64, String? evidenceName}) async {
+            final body = act.toServerJson();
+            if (evidenceBase64 != null) {
+              body['evidence_base64'] = evidenceBase64;
+              body['evidence_name'] = evidenceName ?? 'evidence.jpg';
+            }
+            final res = await ApiService().createUnplannedActivity(body);
+            if (res['success'] == true && res['data'] is Map) {
+              final saved = UnplannedActivity.fromDbJson(
+                  Map<String, dynamic>.from(res['data'] as Map));
+              if (mounted) {
+                setState(() => unplannedActivities.insert(0, saved));
+              }
+              return {'success': true};
+            }
+            return {
+              'success': false,
+              'message': res['message'] ?? 'ስራውን መመዝገብ አልተቻለም'
+            };
           },
-          onUpdateActivity: (act) {
-            setState(() {
-              final idx = unplannedActivities.indexWhere((a) => a.id == act.id);
-              if (idx != -1) unplannedActivities[idx] = act;
-            });
+          onUpdateActivity: (act, {String? evidenceBase64, String? evidenceName}) async {
+            final body = act.toServerJson();
+            if (evidenceBase64 != null) {
+              body['evidence_base64'] = evidenceBase64;
+              body['evidence_name'] = evidenceName ?? 'evidence.jpg';
+            }
+            final res = await ApiService().updateUnplannedActivity(act.id, body);
+            if (res['success'] == true && res['data'] is Map) {
+              final saved = UnplannedActivity.fromDbJson(
+                  Map<String, dynamic>.from(res['data'] as Map));
+              if (mounted) {
+                setState(() {
+                  final idx =
+                      unplannedActivities.indexWhere((a) => a.id == saved.id);
+                  if (idx != -1) unplannedActivities[idx] = saved;
+                });
+              }
+              return {'success': true};
+            }
+            return {
+              'success': false,
+              'message': res['message'] ?? 'ስራውን ማሻሻል አልተቻለም'
+            };
           },
         ),
       ),
