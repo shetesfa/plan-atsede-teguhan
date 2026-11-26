@@ -18,8 +18,15 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.atsedeteguhan.atsede_teguhan_app"
+        // Fresh install identity (2026-11-26): the old package could not be
+        // updated on Tesfa's phone — the old install was debug-signed and
+        // Android refuses a release-signed update over it — so this build
+        // installs as a new app under a new package name.
+        applicationId = "com.atsedeteguhan.atsedeplan"
+        // Arm64 only (2026-11-26): smaller APK for slow downloads.
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
