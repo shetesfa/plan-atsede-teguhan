@@ -636,4 +636,98 @@ class ApiService {
       return {'success': false, 'message': 'የአውታረ-መረብ ስህተት፦ $e'};
     }
   }
+
+  // 14. Telegram ማገናኘት — አንድ ጊዜ ብቻ የሚሰራ 6 አሃዝ ኮድ መጠየቅ (PR #31)
+  // auth.php?action=link_code — Bearer token ያስፈልጋል፤ ኮዱ ለ 15 ደቂቃ ይሰራል።
+  Future<Map<String, dynamic>> requestTelegramLinkCode() async {
+    final url = Uri.parse('$baseUrl/auth.php?action=link_code');
+    try {
+      final res = await http.post(
+        url,
+        headers: _headers,
+      ).timeout(const Duration(seconds: 30));
+
+      final data = jsonDecode(res.body);
+      if (res.statusCode == 200 && data['status'] == 'success') {
+        return {
+          'success': true,
+          'code': data['data']['code']?.toString(),
+          'expiresInSeconds': data['data']['expires_in_seconds'],
+        };
+      }
+      return {'success': false, 'message': data['message'] ?? 'ኮድ ማግኘት አልተቻለም'};
+    } catch (e) {
+      return {'success': false, 'message': 'የአውታረ-መረብ ስህተት፦ $e'};
+    }
+  }
+
+  // 15. Telegram መገናኘቱን ማረጋገጥ (PR #31)
+  Future<Map<String, dynamic>> getTelegramStatus() async {
+    final url = Uri.parse('$baseUrl/auth.php?action=telegram_status');
+    try {
+      final res = await http.get(
+        url,
+        headers: _headers,
+      ).timeout(const Duration(seconds: 30));
+
+      final data = jsonDecode(res.body);
+      if (res.statusCode == 200 && data['status'] == 'success') {
+        return {
+          'success': true,
+          'linked': data['data']['linked'] == true,
+          'telegramChatId': data['data']['telegram_chat_id']?.toString(),
+        };
+      }
+      return {'success': false, 'message': data['message'] ?? 'የ Telegram ሁኔታ ማረጋገጥ አልተቻለም'};
+    } catch (e) {
+      return {'success': false, 'message': 'የአውታረ-መረብ ስህተት፦ $e'};
+    }
+  }
+
+  // 16. Telegram አገናኝ ማቋረጥ (PR #31)
+  Future<Map<String, dynamic>> unlinkTelegram() async {
+    final url = Uri.parse('$baseUrl/auth.php?action=unlink_telegram');
+    try {
+      final res = await http.post(
+        url,
+        headers: _headers,
+      ).timeout(const Duration(seconds: 30));
+
+      final data = jsonDecode(res.body);
+      if (res.statusCode == 200 && data['status'] == 'success') {
+        return {'success': true};
+      }
+      return {'success': false, 'message': data['message'] ?? 'አገናኙን ማቋረጥ አልተቻለም'};
+    } catch (e) {
+      return {'success': false, 'message': 'የአውታረ-መረብ ስህተት፦ $e'};
+    }
+  }
+
+  // 17. የይለፍ ቃል በ Telegram ኮድ ዳግም ማስጀመር (PR #31 — login ሳያስፈልግ)
+  Future<Map<String, dynamic>> resetPasswordWithCode({
+    required String username,
+    required String code,
+    required String newPassword,
+  }) async {
+    final url = Uri.parse('$baseUrl/auth.php?action=reset_with_code');
+    try {
+      final res = await http.post(
+        url,
+        headers: _headers,
+        body: jsonEncode({
+          'username': username.trim(),
+          'code': code.trim(),
+          'new_password': newPassword,
+        }),
+      ).timeout(const Duration(seconds: 30));
+
+      final data = jsonDecode(res.body);
+      if (res.statusCode == 200 && data['status'] == 'success') {
+        return {'success': true, 'message': data['data']['message'] ?? 'የይለፍ ቃል ተቀይሯል'};
+      }
+      return {'success': false, 'message': data['message'] ?? 'የይለፍ ቃል ዳግም ማስጀመር አልተቻለም'};
+    } catch (e) {
+      return {'success': false, 'message': 'የአውታረ-መረብ ስህተት፦ $e'};
+    }
+  }
 }

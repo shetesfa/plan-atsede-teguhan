@@ -3,6 +3,7 @@ import sys
 import json
 import time
 import threading
+from datetime import datetime as _dt, timezone as _tz, timedelta as _td
 import requests
 from flask import Flask, jsonify, request
 
@@ -84,13 +85,58 @@ def add_cors_headers(response):
         response.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
     return response
 
+def bot_api(action, payload=None):
+    """Call the PHP bot API (api/bot.php) server-to-server.
+
+    The PHP side accepts ONLY the shared BOT_PROXY_SECRET (header
+    X-Bot-Proxy-Secret). Returns the decoded `data` dict on success,
+    or None on any failure (unreachable / non-200 / error status).
+    The bot NEVER forwards the secret or any token to Telegram users.
+    """
+    if not PHP_API_BASE or " " in PHP_API_BASE or not BOT_PROXY_SECRET:
+        return None
+    body = dict(payload or {})
+    body["action"] = action
+    try:
+        res = requests.post(
+            f"{PHP_API_BASE.rstrip('/')}/bot.php",
+            headers={"X-Bot-Proxy-Secret": BOT_PROXY_SECRET,
+                     "Content-Type": "application/json"},
+            json=body,
+            timeout=15,
+        )
+        if res.status_code != 200:
+            return None
+        data = res.json()
+        if data.get("status") != "success":
+            return None
+        return data.get("data")
+    except Exception as e:
+        print(f"bot_api({action}) error: {e}")
+        return None
+
+
+def bot_user_by_chat(chat_id):
+    """Who owns this Telegram chat, if the account is linked."""
+    if chat_id is None:
+        return None
+    data = bot_api("user_by_chat", {"chat_id": str(chat_id)})
+    if not data or not data.get("linked"):
+        return None
+    return data.get("user")
+
+
 def get_plans_from_database(dept=None):
-    """እቅዶችን በቀጥታ ከ MySQL / PHP API በማምጣት አንድ የእውነት ምንጭ (Single Source of Truth) መኖሩን ያረጋግጣል"""
+    """LIVE plans from the PHP bot API (server-to-server, proxy auth).
+
+    2026-11-26 (bot upgrade): the old code called plans.php with NO
+    auth, so it always got 401 and silently fell back to the stale
+    static file (137 plans from before the Excel import). Now the bot
+    asks api/bot.php, which returns live data. The static file is
+    ONLY a last resort when the API itself is unreachable.
+    """
     global _php_api_base_warned
-    plans = []
     if PHP_API_BASE:
-        # Never build a request URL from a base that contains a space or is
-        # otherwise unusable -- fall through to the static file instead.
         if " " in PHP_API_BASE:
             if not _php_api_base_warned:
                 print("WARNING: PHP_API_BASE contains a space and is invalid; "
@@ -98,20 +144,13 @@ def get_plans_from_database(dept=None):
                       "Set PHP_API_BASE to a valid URL with no spaces.")
                 _php_api_base_warned = True
         else:
-            try:
-                url = f"{PHP_API_BASE.rstrip('/')}/plans.php"
-                params = {}
-                if dept:
-                    params["dept"] = dept
-                res = requests.get(url, params=params, timeout=5)
-                if res.status_code == 200:
-                    data = res.json()
-                    if data.get("status") == "success":
-                        plans = data.get("data", [])
-            except Exception as e:
-                print(f"Notice: PHP API unavailable, using local JSON fallback: {e}")
-            if plans:
-                return plans
+            payload = {}
+            if dept:
+                payload["department_id"] = dept
+            data = bot_api("plans_list", payload)
+            if data and isinstance(data.get("plans"), list):
+                return data["plans"]
+            print("Notice: PHP bot API unavailable, using local JSON fallback.")
     else:
         if not _php_api_base_warned:
             print("WARNING: PHP_API_BASE is not set -- the PHP API is disabled; "
@@ -239,15 +278,30 @@ def send_notice():
     body = request.get_json(silent=True) or {}
     message = body.get("message", "")
     target_chat = body.get("chat_id") or CHAT_ID
+    report_id = body.get("report_id") or ""
     if not message:
         return jsonify({"error": "መልእክት አልተሰጠም"}), 400
 
+    # 2026-11-26 (bot upgrade): a report notice carries Approve /
+    # Reject buttons for the office. The buttons are inline-keyboard
+    # callbacks (review:approve:<id> / review:reject:<id>); the
+    # polling loop answers them via api/bot.php report_review, after
+    # checking the clicker is a linked super-admin.
+    payload = {
+        "chat_id": target_chat,
+        "text": message,
+        "parse_mode": "HTML",
+    }
+    if report_id:
+        payload["reply_markup"] = {
+            "inline_keyboard": [[
+                {"text": "✅ ጸድቋል", "callback_data": f"review:approve:{report_id}"},
+                {"text": "❌ አልተቀበልም", "callback_data": f"review:reject:{report_id}"},
+            ]]
+        }
+
     try:
-        res = requests.post(f"{BASE_URL}/sendMessage", json={
-            "chat_id": target_chat,
-            "text": message,
-            "parse_mode": "HTML"
-        }, timeout=12)
+        res = requests.post(f"{BASE_URL}/sendMessage", json=payload, timeout=12)
         return jsonify(res.json()), res.status_code
     except Exception as e:
         return jsonify({"error": str(e), "ok": False}), 500
@@ -333,9 +387,10 @@ def proxy_send_photo():
 # IMPORTANT -- SINGLE CONSUMER RULE: Telegram delivers each update to
 # exactly ONE getUpdates consumer. This server's bot polling loop below
 # (bot_polling_loop) is THE consumer: it long-polls getUpdates and
-# answers /start, /plans, /depts, /info. If the Flutter app ALSO polled
-# getUpdates, the two would steal updates from each other and messages
-# would randomly disappear for one side. So:
+# answers /start, /link, /plans, /myplans, /recent, /depts, /reset,
+# /info plus the report-review inline-keyboard callbacks. If the
+# Flutter app ALSO polled getUpdates, the two would steal updates
+# from each other and messages would randomly disappear for one side. So:
 #   * while the bot loop is running, this route returns 409 and the app
 #     must NOT call it -- the app reads chat through the bot / the PHP
 #     chat API instead;
@@ -387,13 +442,13 @@ def proxy_get_updates():
 import html as _html
 
 
-def _send_telegram_message(text):
-    """Send one Telegram message via the server bot token. True on success."""
-    if not BOT_TOKEN:
+def _send_telegram_message_to(chat_id, text):
+    """Send one Telegram message to a given chat. True on success."""
+    if not BOT_TOKEN or not chat_id:
         return False
     try:
         res = requests.post(f"{BASE_URL}/sendMessage", json={
-            "chat_id": CHAT_ID,
+            "chat_id": chat_id,
             "text": text,
             "parse_mode": "HTML"
         }, timeout=15)
@@ -402,6 +457,11 @@ def _send_telegram_message(text):
     except Exception as e:
         print(f"Scheduler send error: {e}")
         return False
+
+
+def _send_telegram_message(text):
+    """Send one Telegram message to the office chat (CHAT_ID)."""
+    return _send_telegram_message_to(CHAT_ID, text)
 
 
 @app.route("/api/scheduler/run", methods=["POST", "OPTIONS"])
@@ -433,6 +493,7 @@ def scheduler_run():
     payload = due_data.get("data", {}) or {}
     due_soon = payload.get("due_soon", []) or []
     overdue = payload.get("overdue", []) or []
+    user_reminders = payload.get("user_reminders", []) or []
 
     sent_items = []
     failed = []
@@ -457,6 +518,44 @@ def scheduler_run():
         else:
             failed.append({"plan_id": plan["id"], "kind": "escalation"})
 
+    # 2026-11-26 (bot upgrade): per-user reminders — each linked user
+    # gets ONLY their own department's plans in their own chat.
+    # One reminder per user per plan per day (the PHP side dedups in
+    # user_reminder_log, and mark_sent below records user_id).
+    user_sent = 0
+    for entry in user_reminders:
+        chat_id = entry.get("chat_id")
+        user_id = entry.get("user_id")
+        if not chat_id or not user_id:
+            continue
+        lines = []
+        for plan in entry.get("overdue", []) or []:
+            task = _html.escape(str(plan.get("main_task") or plan.get("detail_task") or "እቅድ"))
+            when = _html.escape(str(plan.get("execution_time") or ""))
+            lines.append(f"🚨 <b>ዘግይቷል፦</b> “{task}” (<b>{when}</b>)")
+        for plan in entry.get("due_soon", []) or []:
+            task = _html.escape(str(plan.get("main_task") or plan.get("detail_task") or "እቅድ"))
+            when = _html.escape(str(plan.get("execution_time") or ""))
+            lines.append(f"⏰ <b>ቀኑ ደርሷል፦</b> “{task}” (<b>{when}</b>)")
+        if not lines:
+            continue
+        name = _html.escape(str(entry.get("full_name") or ""))
+        dept = _html.escape(str(entry.get("department_name") or ""))
+        text = (f"ሰላም <b>{name}</b> 🕊️\n"
+                f"የ<b>{dept}</b> እቅዶችህ ማሳሰቢያ፦\n\n" + "\n".join(lines[:10]) +
+                "\n\n<i>ሪፖርት በአፕ ውስጥ አስገባ።</i>")
+        if _send_telegram_message_to(chat_id, text):
+            user_sent += 1
+            for plan in entry.get("overdue", []) or []:
+                sent_items.append({"plan_id": plan["id"], "kind": "escalation", "user_id": user_id})
+            for plan in entry.get("due_soon", []) or []:
+                sent_items.append({"plan_id": plan["id"], "kind": "reminder", "user_id": user_id})
+        else:
+            for plan in entry.get("overdue", []) or []:
+                failed.append({"plan_id": plan["id"], "kind": "escalation", "user_id": user_id})
+            for plan in entry.get("due_soon", []) or []:
+                failed.append({"plan_id": plan["id"], "kind": "reminder", "user_id": user_id})
+
     if sent_items:
         try:
             requests.post(
@@ -473,6 +572,8 @@ def scheduler_run():
         "today": payload.get("today"),
         "due_soon": len(due_soon),
         "overdue": len(overdue),
+        "user_reminders": len(user_reminders),
+        "user_messages_sent": user_sent,
         "sent": len(sent_items),
         "failed": failed,
     }), 200
@@ -495,7 +596,90 @@ def send_telegram_reply(chat_id, text, reply_to_message_id=None):
     except Exception as e:
         print(f"Reply error: {e}")
 
+# 2026-11-26 (bot upgrade): in-memory reset flow state.
+# chat_id -> {"stage": "username", "ts": epoch seconds}.
+# A restart loses it — the user just sends /reset again.
+_reset_pending = {}
+
+
+def answer_callback_query(callback_query_id, text):
+    if not BOT_TOKEN:
+        return
+    try:
+        requests.post(f"{BASE_URL}/answerCallbackQuery", json={
+            "callback_query_id": callback_query_id,
+            "text": text,
+            "show_alert": False,
+        }, timeout=10)
+    except Exception as e:
+        print(f"answerCallbackQuery error: {e}")
+
+
+def edit_message_text(chat_id, message_id, text):
+    if not BOT_TOKEN:
+        return
+    try:
+        requests.post(f"{BASE_URL}/editMessageText", json={
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": text,
+            "parse_mode": "HTML",
+        }, timeout=10)
+    except Exception as e:
+        print(f"editMessageText error: {e}")
+
+
+def _short(text, limit=80):
+    text = (text or "").strip().replace("\n", " ")
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def handle_review_callback(callback):
+    """Office Approve / Reject button on a report notice."""
+    data = (callback.get("data") or "")
+    parts = data.split(":")
+    if len(parts) != 3 or parts[0] != "review" or parts[1] not in ("approve", "reject"):
+        return
+    report_id = parts[2]
+    cb_id = callback.get("id")
+    from_chat = (callback.get("from") or {}).get("id")
+    msg = callback.get("message") or {}
+    chat_id = (msg.get("chat") or {}).get("id")
+    message_id = msg.get("message_id")
+    original_text = msg.get("text") or ""
+
+    user = bot_user_by_chat(from_chat)
+    if not user or not user.get("is_super_admin"):
+        answer_callback_query(cb_id, "ይህንን ማድረግ የሚችለው የፅ/ቤት አባል ብቻ ነው።")
+        return
+
+    result = bot_api("report_review", {
+        "report_id": report_id,
+        "action": parts[1],
+        "chat_id": str(from_chat),
+    })
+    if not result:
+        answer_callback_query(cb_id, "ግምገማው አልተመዘገበም — እባክዎ እንደገና ይሞክሩ።")
+        return
+
+    verdict = "✅ ጸድቋል" if result.get("status") == "approved" else "❌ አልተቀበልም"
+    answer_callback_query(cb_id, f"ሪፖርቱ {verdict}")
+    edit_message_text(
+        chat_id, message_id,
+        original_text + f"\n\n<b>{verdict}</b> — {user.get('full_name', '')}",
+    )
+
+
 def handle_update(update):
+    # Inline-keyboard callbacks (report Approve / Reject) come first —
+    # they carry no "message" of their own.
+    if update.get("callback_query"):
+        try:
+            handle_review_callback(update["callback_query"])
+        except Exception as ex:
+            print(f"Error handling callback: {ex}")
+        return
+
     msg = update.get("message") or update.get("channel_post")
     if not msg:
         return
@@ -508,16 +692,137 @@ def handle_update(update):
     if not text:
         return
 
-    if text.startswith("/start") or text.startswith("/help"):
+    linked_user = bot_user_by_chat(chat_id)
+
+    if text.startswith("/start") or text.startswith("/link") or text.startswith("/help"):
+        parts = text.split()
+        code = parts[1] if len(parts) > 1 else ""
+        if code:
+            result = bot_api("link_verify", {"code": code, "chat_id": str(chat_id)})
+            if result:
+                send_telegram_reply(
+                    chat_id,
+                    f"✅ <b>Telegram ተገናኝቷል!</b>\n\n"
+                    f"ሰላም <b>{result.get('full_name', '')}</b> — "
+                    f"ይህ account ከ<b>{result.get('department_name', '')}</b> ጋር ተገናኝቷል።\n\n"
+                    f"አሁን /myplans ብለህ የክፍልህን እቅዶች ማየት ትችላለህ፤ "
+                    f"ማሳሰቢያዎችም ወደዚህ chat ይደርስሃል።",
+                    msg_id,
+                )
+            else:
+                send_telegram_reply(
+                    chat_id,
+                    "⚠️ ኮዱ የተሳሳተ ነው ወይም ጊዜው አልፏል።\n"
+                    "በአፕ ውስጥ Telegram አገናኝ የሚለውን ተጫንና አዲስ ኮድ አግኝተህ እንደገና ላክ።",
+                    msg_id,
+                )
+            return
+        link_hint = ""
+        if linked_user:
+            link_hint = (
+                f"\n✅ ይህ account ከ<b>{linked_user.get('department_name', '')}</b> "
+                f"({linked_user.get('full_name', '')}) ጋር ተገናኝቷል።\n"
+            )
+        else:
+            link_hint = (
+                "\n🔗 Telegramህን ለማገናኘት፦ በአፕ ውስጥ Telegram አገናኝ የሚለውን "
+                "ተጫን፣ ኮድ አግኝተህ እዚህ <b>/start &lt;ኮድ&gt;</b> ብለህ ላክ።\n"
+            )
         welcome = (
-            f"ሰላም <b>{user_name}</b> እንኳን ወደ <b>ዐጸደ ትጉሃን ሰንበት ትምህርት ቤት</b> የእቅድና ሪፖርት ቦት በደህና መጡ! 🕊️\n\n"
+            f"ሰላም <b>{user_name}</b> እንኳን ወደ <b>ዐጸደ ትጉሃን ሰንበት ትምህርት ቤት</b> የእቅድና ሪፖርት ቦት በደህና መጡ! 🕊️\n"
+            f"{link_hint}\n"
             "<b>የሚገኙ ትእዛዞች፦</b>\n"
             "📋 /plans - የክፍሎች አጠቃላይ እቅድ ማጠቃለያ\n"
+            "📌 /myplans - የኔ ክፍል እቅዶች (የተገናኘ account ብቻ)\n"
+            "⏰ /recent - በቅርብ 7 ቀናት ውስጥ የሚደርሱ እቅዶች\n"
             "🏢 /depts - የሁሉም ክፍሎች ስም ዝርዝር\n"
-            "⏰ /recent - የቅርብ ጊዜ እና ወቅታዊ እቅዶች\n"
+            "🔑 /reset - የይለፍ ቃል ዳግም ማስጀመር\n"
             "📢 /info - ስለ ቦቱ እና መተግበሪያው መረጃ\n"
         )
         send_telegram_reply(chat_id, welcome, msg_id)
+
+    elif text.startswith("/reset"):
+        # Linked account? Use their own username straight away.
+        if linked_user:
+            _do_reset_request(chat_id, linked_user.get("username", ""), msg_id)
+            return
+        _reset_pending[str(chat_id)] = {"stage": "username", "ts": time.time()}
+        send_telegram_reply(
+            chat_id,
+            "🔑 <b>የይለፍ ቃል ዳግም ማስጀመር</b>\n\n"
+            "የተጠቃሚ ስምህን ላክ (ለምሳሌ፦ <b>mezmur</b>)።\n"
+            "ኮድ ወደተገናኘው Telegram accountህ ይላካል።\n"
+            "ለማቋረጥ /cancel ላክ።",
+            msg_id,
+        )
+
+    elif text.startswith("/cancel"):
+        _reset_pending.pop(str(chat_id), None)
+        send_telegram_reply(chat_id, "ተቋርጧል — ምንም አልተቀየረም።", msg_id)
+
+    elif text.startswith("/myplans"):
+        if not linked_user:
+            send_telegram_reply(
+                chat_id,
+                "📌 <b>/myplans</b> የራስህን ክፍል እቅዶች ለማየት Telegramህን ማገናኘት አለብህ።\n\n"
+                "በአፕ ውስጥ Telegram አገናኝ የሚለውን ተጫን፣ ኮድ አግኝተህ እዚህ <b>/start &lt;ኮድ&gt;</b> ብለህ ላክ።\n\n"
+                "የሁሉም ክፍል ማጠቃለያ ለማየት /plans ብል።",
+                msg_id,
+            )
+            return
+        data = bot_api("plans_for", {"chat_id": str(chat_id)})
+        if not data:
+            send_telegram_reply(chat_id, "⚠️ እቅዶችን ማምጣት አልተቻለም — እባክዎ ትንሽ ቆይተህ እንደገና ሞክር።", msg_id)
+            return
+        plans = data.get("plans", []) or []
+        # "Today" in Addis Ababa time — the Render container runs on
+        # UTC, and the PHP side also uses Africa/Addis_Ababa.
+        today = _dt.now(_tz(_td(hours=3))).strftime("%Y-%m-%d")
+        overdue = [p for p in plans
+                   if (p.get("due_date") or "") < today
+                   and (p.get("progress_percent") or 0) < 100
+                   and p.get("latest_report_status") not in ("submitted", "under_review", "approved")]
+        upcoming = [p for p in plans
+                    if (p.get("due_date") or "") >= today
+                    and (p.get("progress_percent") or 0) < 100
+                    and p.get("latest_report_status") not in ("submitted", "under_review", "approved")]
+        upcoming.sort(key=lambda p: (p.get("due_date") or "", p.get("id") or ""))
+        lines = [f"📌 <b>የ{linked_user.get('department_name', '')} እቅዶች (ጠቅላላ፦ {data.get('total', len(plans))})፦</b>\n"]
+        if overdue:
+            lines.append(f"🚨 <b>የዘገዩ ({len(overdue)})፦</b>")
+            for p in overdue[:8]:
+                lines.append(f"• “{_short(p.get('main_task'))}” — {p.get('due_date_ethiopian') or p.get('due_date') or ''}")
+            lines.append("")
+        if upcoming:
+            lines.append(f"⏰ <b>በቅርብ የሚደርሱ ({len(upcoming)})፦</b>")
+            for p in upcoming[:8]:
+                lines.append(f"• “{_short(p.get('main_task'))}” — {p.get('due_date_ethiopian') or p.get('due_date') or ''}")
+        if not overdue and not upcoming:
+            lines.append("🎉 ምንም የዘገየ ወይም በቅርብ የሚደርስ እቅድ የለም!")
+        lines.append("\n<i>ዝርዝር እቅዶችን እና ሪፖርቶችን በሞባይል መተግበሪያው ውስጥ መከታተል ይችላሉ!</i>")
+        send_telegram_reply(chat_id, "\n".join(lines), msg_id)
+
+    elif text.startswith("/recent"):
+        data = bot_api("recent_for", {"chat_id": str(chat_id)})
+        if not data:
+            send_telegram_reply(chat_id, "⚠️ እቅዶችን ማምጣት አልተቻለም — እባክዎ ትንሽ ቆይተህ እንደገና ሞክር።", msg_id)
+            return
+        plans = data.get("plans", []) or []
+        scope = ""
+        if data.get("user"):
+            scope = f" — {data['user'].get('department_name', '')}"
+        if not plans:
+            send_telegram_reply(
+                chat_id,
+                f"⏰ <b>የቅርብ 7 ቀናት እቅዶች{scope}፦</b>\n\nበቅርብ 7 ቀናት ውስጥ የሚደርስ ወይም የዘገየ እቅድ የለም። 🎉",
+                msg_id,
+            )
+            return
+        lines = [f"⏰ <b>የቅርብ 7 ቀናት እቅዶች{scope} ({len(plans)})፦</b>\n"]
+        for p in plans[:15]:
+            dept = f"[{p.get('department_name', '')}] " if not data.get("user") else ""
+            lines.append(f"• {dept}“{_short(p.get('main_task'))}” — {p.get('due_date_ethiopian') or p.get('due_date') or ''}")
+        send_telegram_reply(chat_id, "\n".join(lines), msg_id)
 
     elif text.startswith("/depts"):
         depts_text = (
@@ -526,31 +831,39 @@ def handle_update(update):
             "2. መርሃግብር እና ጉባኤያት ክፍል\n"
             "3. መዝሙርና ስነጥበብ ክፍል\n"
             "4. ልማትና በጎ አድራጎት ክፍል\n"
-            "5. አባላት አስተዳደር ክፍል\n"
-            "6. መረጃና የውስጥ ግንኙነት ክፍል\n"
+            "5. መረጃና የውስጥ ግንኙነት ክፍል\n"
+            "6. ቁጥጥር ክፍል\n"
             "7. በጀት እና ንብረት አስተዳደር ክፍል\n"
             "8. ሰው ሀብት አስተዳደር ክፍል\n"
-            "9. ቁጥጥር ክፍል\n"
-            "10. ጽ/ቤት\n"
+            "9. ጽ/ቤት\n"
         )
         send_telegram_reply(chat_id, depts_text, msg_id)
 
     elif text.startswith("/plans") or text.startswith("/plan"):
-        plans = get_plans_from_database()
-        total = len(plans)
-        if total == 0:
-            send_telegram_reply(chat_id, "⚠️ በአሁኑ ወቅት የተመዘገበ እቅድ አልተገኘም።", msg_id)
+        data = bot_api("plans_summary", {})
+        if not data:
+            # LIVE አገልጋዩ ካልተገኘ ወደ ቀድሞው የፋይል ምንጭ መመለስ።
+            plans = get_plans_from_database()
+            total = len(plans)
+            if total == 0:
+                send_telegram_reply(chat_id, "⚠️ በአሁኑ ወቅት የተመዘገበ እቅድ አልተገኘም።", msg_id)
+                return
+            summary = {}
+            for p in plans:
+                dept = p.get("department_name") or p.get("department", "ሌላ")
+                summary[dept] = summary.get(dept, 0) + 1
+            lines = [f"📊 <b>የ2019 ዓ.ም የእቅዶች ማጠቃለያ (ጠቅላላ፦ {total})፦</b>\n"]
+            for dept, cnt in summary.items():
+                lines.append(f"• <b>{dept}</b>፦ {cnt} እቅዶች")
+            lines.append("\n<i>ዝርዝር እቅዶችን እና ሪፖርቶችን በሞባይል መተግበሪያው ውስጥ መከታተል ይችላሉ!</i>")
+            send_telegram_reply(chat_id, "\n".join(lines), msg_id)
             return
-
-        summary = {}
-        for p in plans:
-            dept = p.get("department_name") or p.get("department", "ሌላ")
-            summary[dept] = summary.get(dept, 0) + 1
-
-        lines = [f"📊 <b>የ2019 ዓ.ም የእቅዶች ማጠቃለያ (ጠቅላላ፦ {total})፦</b>\n"]
-        for dept, cnt in summary.items():
+        lines = [f"📊 <b>የ2019 ዓ.ም የእቅዶች ማጠቃለያ (ጠቅላላ፦ {data.get('total', 0)})፦</b>\n"]
+        for dept, cnt in (data.get("by_department") or {}).items():
             lines.append(f"• <b>{dept}</b>፦ {cnt} እቅዶች")
-        lines.append("\n<i>ዝርዝር እቅዶችን እና ሪፖርቶችን በሞባይል መተግበሪያው ውስጥ መከታተል ይችላሉ!</i>")
+        if data.get("overdue_count"):
+            lines.append(f"\n🚨 <b>የዘገዩ፦ {data['overdue_count']}</b>")
+        lines.append("\n<i>የራስህን ክፍል ብቻ ለማየት Telegramህን አገናኝተህ /myplans ብል።</i>")
         send_telegram_reply(chat_id, "\n".join(lines), msg_id)
 
     elif text.startswith("/info"):
@@ -560,6 +873,58 @@ def handle_update(update):
             "🟢 ሁኔታ፦ መስመር ላይ (Online 24/7)"
         )
         send_telegram_reply(chat_id, info_text, msg_id)
+
+    elif not text.startswith("/"):
+        # /reset የጠየቀ ሰው የተጠቃሚ ስሙን ሲልክ (multi-step reset)።
+        pending = _reset_pending.get(str(chat_id))
+        if pending and pending.get("stage") == "username":
+            if time.time() - pending.get("ts", 0) > 600:
+                _reset_pending.pop(str(chat_id), None)
+                send_telegram_reply(chat_id, "⏰ ጊዜው አልፏል — /reset ብለህ እንደገና ጀምር።", msg_id)
+                return
+            _reset_pending.pop(str(chat_id), None)
+            _do_reset_request(chat_id, text.split()[0], msg_id)
+            return
+        # Unknown free text — point at the commands, do not stay silent.
+        send_telegram_reply(
+            chat_id,
+            "ትእዛዙን አልተረዳሁም። የሚገኙ ትእዛዞች፦ /plans, /myplans, /recent, /depts, /reset, /info — ወይም /help።",
+            msg_id,
+        )
+
+
+def _do_reset_request(chat_id, username, msg_id):
+    """Ask the PHP API for a reset code and deliver it to the LINKED chat.
+
+    The code goes ONLY to the chat the account is linked to — never to
+    the chat that merely typed the username. If the account is not
+    linked (or does not exist) the reply stays generic on purpose.
+    """
+    result = bot_api("reset_request", {"username": username})
+    if not result or not result.get("ok"):
+        send_telegram_reply(
+            chat_id,
+            "⚠️ ይህ account ከ Telegram ጋር አልተገናኘም ወይም አልተገኘም።\n"
+            "መጀመሪያ በአፕ ውስጥ Telegram አገናኝ — ከዚያ /reset ብለህ ሞክር።",
+            msg_id,
+        )
+        return
+    target_chat = result.get("chat_id")
+    code = result.get("code")
+    name = result.get("full_name") or ""
+    _send_telegram_message_to(target_chat,
+        f"🔑 <b>የይለፍ ቃል ዳግም ማስጀመሪያ ኮድ</b>\n\n"
+        f"ሰላም <b>{name}</b> — የአንድ ጊዜ ኮድህ፦ <b>{code}</b>\n\n"
+        f"ኮዱ ለ<b>15 ደቂቃ</b> ብቻ ይሰራል።\n"
+        f"በአፕ ውስጥ ከመግቢያ ገጹ «የይለፍ ቃል ረሳህ?» የሚለውን ተጫንና "
+        f"ኮዱንና አዲሱን የይለፍ ቃል አስገባ።\n\n"
+        f"<i>ይህንን አንተ ካልጠየክህ ኮዱን ለማንም አትስጥ።</i>")
+    if str(target_chat) != str(chat_id):
+        send_telegram_reply(
+            chat_id,
+            "📩 ኮድ ወደተገናኘው Telegram account ልኬያለሁ — እዚያ አግኝተህ በአፕ ውስጥ አስገባ።",
+            msg_id,
+        )
 
 def bot_polling_loop():
     global BOT_LOOP_RUNNING
@@ -572,7 +937,7 @@ def bot_polling_loop():
     last_update_id = None
     while True:
         try:
-            params = {"timeout": 20, "allowed_updates": ["message", "channel_post"]}
+            params = {"timeout": 20, "allowed_updates": ["message", "channel_post", "callback_query"]}
             if last_update_id:
                 params["offset"] = last_update_id + 1
 

@@ -115,15 +115,86 @@ if ($method === 'GET' && $action === 'due') {
     usort($dueSoon, $byDue);
     usort($overdue, $byDue);
 
+    // 2026-11-26 (bot upgrade): per-user reminders — each LINKED user
+    // gets their own department's due-soon + overdue plans in their
+    // own Telegram chat. One reminder per user per plan per day
+    // (user_reminder_log). The office summary above is unchanged.
+    $userReminders = [];
+    $userStmt = $pdo->query("
+        SELECT u.id, u.full_name, u.telegram_chat_id, u.department_id,
+               d.name AS department_name, d.is_super_admin, d.can_view_all
+        FROM users u
+        JOIN departments d ON u.department_id = d.id
+        WHERE u.telegram_chat_id IS NOT NULL AND u.telegram_chat_id <> ''
+          AND u.status = 'active'
+        ORDER BY u.department_id, u.full_name
+    ");
+    $linkedUsers = $userStmt->fetchAll();
+
+    $userLogStmt = $pdo->prepare("SELECT user_id, plan_id, kind FROM user_reminder_log WHERE sent_date = ?");
+    $userLogStmt->execute([$todayStr]);
+    $userLogged = [];
+    foreach ($userLogStmt->fetchAll() as $row) {
+        $userLogged[$row['user_id'] . ':' . $row['plan_id'] . ':' . $row['kind']] = true;
+    }
+
+    foreach ($linkedUsers as $u) {
+        $uDueSoon = [];
+        $uOverdue = [];
+        $seeAll = !empty($u['is_super_admin']) || !empty($u['can_view_all']);
+        foreach ($plans as $p) {
+            if (!$seeAll && $p['department_id'] !== $u['department_id']) continue;
+            $due = parseEthiopianDate($p['execution_time']) ?: $p['due_date'];
+            if ($due === null) continue;
+            $reported = in_array($p['latest_report_status'], ['submitted', 'under_review', 'approved'], true);
+            if ($reported) continue;
+            $item = [
+                'id' => $p['id'],
+                'department_id' => $p['department_id'],
+                'department_name' => $p['department_name'],
+                'main_task' => $p['main_task'],
+                'detail_task' => $p['detail_task'],
+                'execution_time' => $p['execution_time'],
+                'due_date' => $due,
+                'is_postponed' => (bool)$p['is_postponed'],
+                'postponed_date' => $p['postponed_date'],
+            ];
+            if ($due < $todayStr) {
+                if (empty($userLogged[$u['id'] . ':' . $p['id'] . ':escalation'])) {
+                    $uOverdue[] = $item;
+                }
+            } elseif ($due === $todayStr || $due === $tomorrowStr) {
+                if (empty($userLogged[$u['id'] . ':' . $p['id'] . ':reminder'])) {
+                    $uDueSoon[] = $item;
+                }
+            }
+        }
+        if (empty($uDueSoon) && empty($uOverdue)) continue;
+        usort($uDueSoon, $byDue);
+        usort($uOverdue, $byDue);
+        $userReminders[] = [
+            'user_id' => (int)$u['id'],
+            'full_name' => $u['full_name'],
+            'chat_id' => $u['telegram_chat_id'],
+            'department_id' => $u['department_id'],
+            'department_name' => $u['department_name'],
+            'due_soon' => $uDueSoon,
+            'overdue' => $uOverdue,
+        ];
+    }
+
     jsonResponse([
         'today' => $todayStr,
         'due_soon' => $dueSoon,
         'overdue' => $overdue,
+        'user_reminders' => $userReminders,
     ]);
 }
 
 // 2. Mark reminders as sent (POST ?action=mark_sent)
-// Body: {"items": [{"plan_id": "...", "kind": "reminder"|"escalation"}]}
+// Body: {"items": [{"plan_id": "...", "kind": "reminder"|"escalation", "user_id": 123}]}
+// An item WITH user_id is a per-user reminder (user_reminder_log);
+// without it, it is the office reminder (reminder_log) as before.
 if ($method === 'POST' && $action === 'mark_sent') {
     $input = getJsonInput();
     $items = $input['items'] ?? [];
@@ -135,12 +206,22 @@ if ($method === 'POST' && $action === 'mark_sent') {
         VALUES (?, ?, ?)
         ON DUPLICATE KEY UPDATE sent_at = CURRENT_TIMESTAMP
     ");
+    $insUser = $pdo->prepare("
+        INSERT INTO user_reminder_log (user_id, plan_id, kind, sent_date)
+        VALUES (?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE sent_at = CURRENT_TIMESTAMP
+    ");
     $marked = 0;
     foreach ($items as $it) {
         $planId = $it['plan_id'] ?? '';
         $kind = $it['kind'] ?? '';
         if ($planId === '' || !in_array($kind, ['reminder', 'escalation'], true)) continue;
-        $ins->execute([$planId, $kind, $todayStr]);
+        $userId = (int)($it['user_id'] ?? 0);
+        if ($userId > 0) {
+            $insUser->execute([$userId, $planId, $kind, $todayStr]);
+        } else {
+            $ins->execute([$planId, $kind, $todayStr]);
+        }
         $marked++;
     }
     jsonResponse(['message' => "$marked ማሳሰቢያዎች ተመዝግበዋል", 'marked' => $marked]);

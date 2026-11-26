@@ -98,6 +98,155 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     }
   }
 
+  /// የይለፍ ቃል በ Telegram ኮድ ዳግም ማስጀመሪያ ማውጫ (PR #31)
+  Future<void> _showResetPasswordDialog() async {
+    final usernameController = TextEditingController(text: selectedDept.id);
+    final codeController = TextEditingController();
+    final newPasswordController = TextEditingController();
+    final confirmPasswordController = TextEditingController();
+    bool isSubmitting = false;
+    String? dialogError;
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          Future<void> submit() async {
+            final username = usernameController.text.trim();
+            final code = codeController.text.trim();
+            final newPassword = newPasswordController.text;
+            final confirmPassword = confirmPasswordController.text;
+
+            if (username.isEmpty) {
+              setDialogState(() => dialogError = 'እባክዎ የተጠቃሚ ስም (ክፍል) ያስገቡ።');
+              return;
+            }
+            if (code.length != 6 || int.tryParse(code) == null) {
+              setDialogState(() => dialogError = 'እባክዎ 6 አሃዝ ኮድ ያስገቡ።');
+              return;
+            }
+            if (newPassword.length < 8 || !RegExp(r'\d').hasMatch(newPassword)) {
+              setDialogState(() => dialogError = 'አዲሱ የይለፍ ቃል ቢያንስ 8 ፊደል እና ቢያንስ አንድ ቁጥር መያዝ አለበት።');
+              return;
+            }
+            if (newPassword != confirmPassword) {
+              setDialogState(() => dialogError = 'ሁለቱ የይለፍ ቃሎች አንድ አይነት አይደሉም።');
+              return;
+            }
+
+            setDialogState(() {
+              isSubmitting = true;
+              dialogError = null;
+            });
+
+            final res = await ApiService().resetPasswordWithCode(
+              username: username,
+              code: code,
+              newPassword: newPassword,
+            );
+
+            if (!ctx.mounted) return;
+            setDialogState(() => isSubmitting = false);
+            if (res['success'] == true) {
+              Navigator.pop(ctx, true);
+            } else {
+              setDialogState(() => dialogError = res['message']?.toString() ?? 'የይለፍ ቃል ዳግም ማስጀመር አልተቻለም።');
+            }
+          }
+
+          return AlertDialog(
+            title: const Text('የይለፍ ቃል ዳግም ማስጀመር', style: TextStyle(fontSize: 16)),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'በቴሌግራም @atsede_leaders_bot ን ከፍተህ /reset ላክ — 6 አሃዝ ኮድ ወደ Telegramህ ይደርስሃል። ኮዱንና አዲሱን የይለፍ ቃል እዚህ አስገባ።',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: usernameController,
+                    decoration: const InputDecoration(
+                      labelText: 'የተጠቃሚ ስም (ክፍል)',
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: codeController,
+                    keyboardType: TextInputType.number,
+                    maxLength: 6,
+                    decoration: const InputDecoration(
+                      labelText: '6 አሃዝ ኮድ',
+                      border: OutlineInputBorder(),
+                      counterText: '',
+                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: newPasswordController,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      labelText: 'አዲስ የይለፍ ቃል',
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: confirmPasswordController,
+                    obscureText: true,
+                    onSubmitted: (_) => submit(),
+                    decoration: const InputDecoration(
+                      labelText: 'አዲሱን የይለፍ ቃል እንደገና ያስገቡ',
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    ),
+                  ),
+                  if (dialogError != null) ...[
+                    const SizedBox(height: 12),
+                    Text(dialogError!, style: const TextStyle(fontSize: 12, color: Color(0xFFC62828))),
+                  ],
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: isSubmitting ? null : () => Navigator.pop(ctx, false),
+                child: const Text('ሰርዝ'),
+              ),
+              ElevatedButton(
+                onPressed: isSubmitting ? null : submit,
+                style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryMaroon),
+                child: isSubmitting
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : const Text('የይለፍ ቃል አድስ', style: TextStyle(color: Colors.white)),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    usernameController.dispose();
+    codeController.dispose();
+    newPasswordController.dispose();
+    confirmPasswordController.dispose();
+
+    if (result == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('የይለፍ ቃልዎ ተቀይሯል — በአዲሱ ይግቡ'),
+          backgroundColor: AppTheme.greenSuccess,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
@@ -507,9 +656,21 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
         ),
         const SizedBox(height: 16),
 
+        // PR #31፦ የይለፍ ቃል በ Telegram ኮድ ዳግም ማስጀመር
+        Center(
+          child: TextButton(
+            onPressed: isLoading ? null : _showResetPasswordDialog,
+            child: const Text(
+              'የይለፍ ቃል ረሳህ?',
+              style: TextStyle(fontSize: 13, color: AppTheme.primaryMaroon, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+
         const Center(
           child: Text(
-            'የፅ/ቤት እና የ10ሩ ክፍሎች ማዕከላዊ ቁጥጥር ስርዓት',
+            'የፅ/ቤት እና የ9ቱ ክፍሎች ማዕከላዊ ቁጥጥር ስርዓት',
             style: TextStyle(fontSize: 11, color: Color(0xFF8C827A)),
           ),
         ),
