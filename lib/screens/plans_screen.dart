@@ -332,7 +332,7 @@ class _PlansScreenState extends State<PlansScreen> {
                             if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
-                                  content: Text('አገልጋዩ አልተገኘም — እቅዱ ከመስመር ውጭ ተቀምጧል፤ ኢንተርኔት ሲገኝ በራስ-ሰር ይላካል። (${result['message'] ?? ''})'),
+                                  content: Text('አገልጋዩ አልተገኘም — እቅዱ offline ተቀምጧል፤ ኢንተርኔት ሲገኝ በራስ-ሰር ይላካል። (${result['message'] ?? ''})'),
                                   backgroundColor: Colors.orange.shade800,
                                   duration: const Duration(seconds: 5),
                                 ),
@@ -393,7 +393,7 @@ class _PlansScreenState extends State<PlansScreen> {
       );
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('አገልጋዩ አልተገኘም — የመሰረዝ ጥያቄው ከመስመር ውጭ ተቀምጧል፤ ኢንተርኔት ሲገኝ ይላካል።'),
+          content: Text('አገልጋዩ አልተገኘም — የመሰረዝ ጥያቄው offline ተቀምጧል፤ ኢንተርኔት ሲገኝ ይላካል።'),
           backgroundColor: Colors.orange,
           duration: Duration(seconds: 5),
         ),
@@ -695,7 +695,7 @@ class _PlansScreenState extends State<PlansScreen> {
                                     Navigator.pop(context);
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
-                                        content: Text('አገልጋዩ አልተገኘም — ሪፖርቱ ከመስመር ውጭ ተቀምጧል፤ ኢንተርኔት ሲገኝ በራስ-ሰር ይላካል። (${result['message'] ?? ''})'),
+                                        content: Text('አገልጋዩ አልተገኘም — ሪፖርቱ offline ተቀምጧል፤ ኢንተርኔት ሲገኝ በራስ-ሰር ይላካል። (${result['message'] ?? ''})'),
                                         backgroundColor: Colors.orange.shade800,
                                         duration: const Duration(seconds: 5),
                                       ),
@@ -981,7 +981,7 @@ class _PlansScreenState extends State<PlansScreen> {
                                     Navigator.pop(context);
                                     ScaffoldMessenger.of(context).showSnackBar(
                                       SnackBar(
-                                        content: Text('አገልጋዩ አልተገኘም — ማስተላለፉ ከመስመር ውጭ ተቀምጧል፤ ኢንተርኔት ሲገኝ ይላካል። (${result['message'] ?? ''})'),
+                                        content: Text('አገልጋዩ አልተገኘም — ማስተላለፉ offline ተቀምጧል፤ ኢንተርኔት ሲገኝ ይላካል። (${result['message'] ?? ''})'),
                                         backgroundColor: Colors.orange.shade800,
                                         duration: const Duration(seconds: 5),
                                       ),
