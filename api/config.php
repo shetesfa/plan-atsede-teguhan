@@ -246,7 +246,7 @@ function verifyToken(?string $token, ?PDO $pdo = null): ?array {
         if ($userId) {
             try {
                 $uStmt = $pdo->prepare("
-                    SELECT u.id, u.username, u.department_id, u.full_name, u.role_title, u.status,
+                    SELECT u.id, u.username, u.department_id, u.full_name, u.role_title, u.role, u.status,
                            d.is_super_admin, d.name AS department_name
                     FROM users u
                     LEFT JOIN departments d ON u.department_id = d.id
@@ -266,6 +266,10 @@ function verifyToken(?string $token, ?PDO $pdo = null): ?array {
                 $payload['department_name'] = $liveUser['department_name'];
                 $payload['full_name'] = $liveUser['full_name'];
                 $payload['role_title'] = $liveUser['role_title'];
+                // 2026-11-26: per-user permission role — fresh from the DB
+                // on every request (never trust an old token for this).
+                $payload['role'] = $liveUser['role'] ?? 'member';
+                $payload['is_dept_admin'] = (($liveUser['role'] ?? '') === 'dept_admin');
                 $payload['is_super_admin'] = (bool)($liveUser['is_super_admin'] ?? false);
             } catch (\Exception $e) {
                 return null; // Fail-Closed
