@@ -334,8 +334,8 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           // drop it from the parent list (the screen keeps its own
           // copy too and removes it at once).
           onDeleteActivity: (act) async {
-            final ok = await ApiService().deleteUnplannedActivity(act.id);
-            if (ok) {
+            final res = await ApiService().deleteUnplannedActivity(act.id);
+            if (res['success'] == true) {
               if (mounted) {
                 setState(() =>
                     unplannedActivities.removeWhere((a) => a.id == act.id));
@@ -344,7 +344,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
             }
             return {
               'success': false,
-              'message': 'ስራውን መሰረዝ አልተቻለም'
+              'message': res['message'] ?? 'ስራውን መሰረዝ አልተቻለም'
             };
           },
         ),

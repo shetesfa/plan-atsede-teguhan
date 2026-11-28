@@ -271,8 +271,33 @@ class _PlansScreenState extends State<PlansScreen> {
     }
     try {
       final bytes = OfficeExportService.generateExcelFile(
-        plans: filteredPlans,
         sheetName: 'እቅዶች',
+        headers: const [
+          'ክፍል',
+          'ንዑስ ክፍል',
+          'ዋና ተግባር',
+          'ዝርዝር ተግባር',
+          'መለኪያ',
+          'ብዛት',
+          'የትግበራ ጊዜ',
+          'በጀት',
+          'እድገት %',
+          'አስተያየት',
+        ],
+        rows: filteredPlans
+            .map<List<dynamic>>((p) => [
+                  p.departmentName,
+                  p.subDepartment,
+                  p.mainTask,
+                  p.detailTask,
+                  p.measurement,
+                  p.quantity,
+                  p.executionTime,
+                  p.budget,
+                  p.progressPercent,
+                  p.remarks,
+                ])
+            .toList(),
       );
       final ok = await downloadBytes(
         bytes: bytes,
