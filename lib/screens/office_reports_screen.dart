@@ -23,7 +23,15 @@ class _OfficeReportsScreenState extends State<OfficeReportsScreen> {
   @override
   void initState() {
     super.initState();
-    _loadReports();
+    // 2026-11-28: only the office (super admin) and the control
+    // department (can_view_all) may open this screen — for anyone else
+    // there is nothing to load; the build method shows the denied
+    // message instead of the list.
+    if (AuthService.isSuperAdmin || AuthService.canViewAll) {
+      _loadReports();
+    } else {
+      isLoading = false;
+    }
   }
 
   Future<void> _loadReports() async {
@@ -242,6 +250,39 @@ class _OfficeReportsScreenState extends State<OfficeReportsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 2026-11-28 (defense-in-depth): Office Review is for the office
+    // (super admin) and the control department (can_view_all) only. A
+    // department head who reaches this screen another way sees this
+    // message instead of the report list. Data loading and the
+    // review/decision button inside stay unchanged — the button is
+    // already super-admin-only.
+    if (!AuthService.isSuperAdmin && !AuthService.canViewAll) {
+      return Scaffold(
+        backgroundColor: AppTheme.backgroundLight,
+        appBar: AppBar(
+          title: const Text('የፅ/ቤት ሪፖርቶች መገምገሚያ (Office Review)'),
+          backgroundColor: AppTheme.primaryMaroon,
+          foregroundColor: Colors.white,
+        ),
+        body: const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.lock_outline, size: 64, color: Colors.grey),
+                SizedBox(height: 16),
+                Text(
+                  'ይህ ገጽ ለፅ/ቤት እና ለቁጥጥር ክፍል ብቻ ነው።',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
     return Scaffold(
       backgroundColor: AppTheme.backgroundLight,
       appBar: AppBar(

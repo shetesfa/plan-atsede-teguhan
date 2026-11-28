@@ -496,17 +496,23 @@ class DocumentsHubScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
-            _paperCard(
-              context: context,
-              icon: Icons.rate_review_outlined,
-              iconColor: AppTheme.primaryMaroon,
-              title: 'የክንውን ሪፖርቶች መገምገሚያ (Office Review)',
-              subtitle: 'በክፍሎች የቀረቡ የክንውን ሪፖርቶችን ይገምግሙ፣ ያጽድቁ፣ ወይም ማሻሻያ አስተያየት ይስጡ።',
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (ctx) => const OfficeReportsScreen()),
+            // 2026-11-28: Office Review is for the office (super admin)
+            // and the control department (can_view_all, view-only) only.
+            // A department head is admin inside their OWN plan control,
+            // but must not see or control other departments' reports —
+            // so this card stays hidden for them.
+            if (AuthService.isSuperAdmin || AuthService.canViewAll)
+              _paperCard(
+                context: context,
+                icon: Icons.rate_review_outlined,
+                iconColor: AppTheme.primaryMaroon,
+                title: 'የክንውን ሪፖርቶች መገምገሚያ (Office Review)',
+                subtitle: 'በክፍሎች የቀረቡ የክንውን ሪፖርቶችን ይገምግሙ፣ ያጽድቁ፣ ወይም ማሻሻያ አስተያየት ይስጡ።',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (ctx) => const OfficeReportsScreen()),
+                ),
               ),
-            ),
             _paperCard(
               context: context,
               icon: Icons.mail_outline,
