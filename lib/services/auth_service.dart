@@ -113,12 +113,18 @@ class AuthService {
 
   /// ከአገልጋዩ ጋር በቀጥታ በመገናኘት ተጠቃሚው አሁንም ንቁ መሆኑን ያረጋግጣል
   static void _validateLiveSessionAsync() {
-    ApiService().getCurrentUser().then((user) {
+    ApiService().getCurrentUser().then((user) async {
       if (user == null) {
         // ተጠቃሚው ተሰርዟል ወይም ታግዷል
         logout();
       } else {
         currentUserProfile = user;
+        // 2026-11-28: the refreshed profile is saved too, so the next
+        // cold start does not restore the stale cached one again.
+        try {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString(_prefProfileKey, jsonEncode(user));
+        } catch (_) {}
       }
     }).catchError((_) {});
   }

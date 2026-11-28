@@ -122,7 +122,7 @@ if ($action === 'me' && $method === 'GET') {
     $auth = requireAuth();
 
     $stmt = $pdo->prepare("
-        SELECT u.id, u.username, u.full_name, u.role_title, u.phone, u.email, u.last_login, u.must_change_password,
+        SELECT u.id, u.username, u.full_name, u.role_title, u.role, u.phone, u.email, u.last_login, u.must_change_password,
                d.id AS department_id, d.name AS department_name, d.short_name AS department_short_name, d.is_super_admin, d.can_view_all
         FROM users u
         JOIN departments d ON u.department_id = d.id
@@ -136,7 +136,27 @@ if ($action === 'me' && $method === 'GET') {
         jsonError('ተጠቃሚው አልተገኘም ወይም ታግዷል!', 404);
     }
 
-    jsonResponse(['user' => $user]);
+    // 2026-11-28: the app's profile refresh reads this response — it
+    // must carry the SAME role flags as login (role, is_dept_admin,
+    // and real booleans, not 0/1 ints: Dart `== true` fails on ints),
+    // or the app can never self-heal a stale cached profile.
+    jsonResponse(['user' => [
+        'id' => (int)$user['id'],
+        'username' => $user['username'],
+        'full_name' => $user['full_name'],
+        'role_title' => $user['role_title'],
+        'phone' => $user['phone'],
+        'email' => $user['email'],
+        'last_login' => $user['last_login'],
+        'must_change_password' => (bool)($user['must_change_password'] ?? 0),
+        'department_id' => $user['department_id'],
+        'department_name' => $user['department_name'],
+        'department_short_name' => $user['department_short_name'],
+        'is_super_admin' => (bool)($user['is_super_admin'] ?? false),
+        'can_view_all' => (bool)($user['can_view_all'] ?? false),
+        'role' => $user['role'] ?? 'member',
+        'is_dept_admin' => (($user['role'] ?? '') === 'dept_admin'),
+    ]]);
 }
 
 // 4. የይለፍ ቃል መቀየሪያ (Change Password)

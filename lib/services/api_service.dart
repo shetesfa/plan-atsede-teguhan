@@ -216,8 +216,11 @@ class ApiService {
     if (res.statusCode == 200) {
       try {
         final data = jsonDecode(res.body);
-        if (data['user'] != null && data['user'] is Map) {
-          final user = Map<String, dynamic>.from(data['user']);
+        // /me is enveloped like every API response:
+        // {status, timestamp, data: {user: {...}}}.
+        final dynamic rawUser = data['data']?['user'] ?? data['user'];
+        if (rawUser != null && rawUser is Map) {
+          final user = Map<String, dynamic>.from(rawUser);
           currentUser = user;
           return user;
         }
@@ -721,6 +724,36 @@ class ApiService {
       return {'success': false, 'message': data['message'] ?? 'የ Telegram ሁኔታ ማረጋገጥ አልተቻለም'};
     } catch (e) {
       return {'success': false, 'message': 'የአውታረ-መረብ ስህተት፦ $e'};
+    }
+  }
+
+  // 15b. Telegram relay (2026-11-28)፦ መልእክት በሰርቨር በኩል ወደ ጽ/ቤት
+  // Telegram chat ይላካል — አፑ bot token አያስፈልገውም፣ target chatም
+  // ከሰርቨር በኩል ብቻ ነው። ካልተሳካ false ይመለሳል እና ጥሪው ወደ ቀደሙት
+  // መንገዶች (ቀጥታ / proxy) ይመለሳል።
+  Future<bool> sendTelegramRelay({
+    required String action,
+    required String message,
+    String? reportId,
+  }) async {
+    final url = Uri.parse('$baseUrl/notify.php');
+    try {
+      final res = await http.post(
+        url,
+        headers: _headers,
+        body: jsonEncode({
+          'action': action,
+          'message': message,
+          if (reportId != null) 'report_id': reportId,
+        }),
+      ).timeout(const Duration(seconds: 15));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        return data['data']?['ok'] == true;
+      }
+      return false;
+    } catch (_) {
+      return false;
     }
   }
 

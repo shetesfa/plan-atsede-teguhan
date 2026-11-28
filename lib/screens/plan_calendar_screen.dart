@@ -230,7 +230,10 @@ class _PlanCalendarScreenState extends State<PlanCalendarScreen> {
     buffer.writeln('⚠️ <b>ማሳሰቢያ ለክፍላት ኃላፊዎች፦</b>');
     buffer.writeln('ያዘገዩ እቅዶችን ሪፖርት በአፑ በኩል እንዲያቀርቡ ወይም ወደፊት የሚከናወኑ ከሆነ <b>ቀኑን እንዲያስተላልፉ (Postpone)</b> በአክብሮት እናሳስባለን።');
 
-    final success = await TelegramService.sendMessage(text: buffer.toString());
+    final success = await TelegramService.sendMessage(
+      text: buffer.toString(),
+      relayAction: 'overdue_alert',
+    );
     setState(() => isSendingAlert = false);
 
     if (mounted) {
