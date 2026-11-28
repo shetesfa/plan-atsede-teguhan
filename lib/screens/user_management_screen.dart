@@ -306,7 +306,22 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     final choice = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('${u['full_name'] ?? ''}', style: const TextStyle(fontSize: 16)),
+        // PR #46: a second, larger close target — the "ዝጋ" text button
+        // alone was easy to miss on the web canvas (same tap-precision
+        // class as item 14). The code was already correct (pop(null));
+        // the button just needed a bigger, unmissable target.
+        title: Row(
+          children: [
+            Expanded(
+              child: Text('${u['full_name'] ?? ''}', style: const TextStyle(fontSize: 16)),
+            ),
+            IconButton(
+              icon: const Icon(Icons.close),
+              tooltip: 'ዝጋ',
+              onPressed: () => Navigator.of(ctx).pop(null),
+            ),
+          ],
+        ),
         content: Text(
           '${u['username'] ?? ''} • ${u['department_name'] ?? u['department_id'] ?? ''}\n${_roleLabel('${u['role'] ?? 'member'}')} • ${isActive ? 'ንቁ' : 'ታግዷል'}',
           style: const TextStyle(fontSize: 13),

@@ -1,9 +1,13 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import '../models/department.dart';
 import '../services/api_service.dart';
+import '../services/auth_service.dart';
+import '../services/file_download.dart';
 import '../theme/app_theme.dart';
 import '../widgets/telegram_connect_dialog.dart';
 
@@ -20,7 +24,12 @@ class _DocumentEditorScreenState extends State<DocumentEditorScreen> {
 
   // አጠቃላይ መረጃ
   final orgOrHeaderCtrl = TextEditingController(text: 'ዐጸደ ትጉሃን ሰንበት ትምህርት ቤት');
-  String selectedDept = 'ትምህርት እና ስልጠና ክፍል';
+  // PR #46: this used to be a hardcoded department NAME
+  // ('ትምህርት እና ስልጠና ክፍል') sent as department_id. The server takes
+  // the value verbatim for the office, so office saves were filed under
+  // a bogus department id no filter could ever find. It is now a real
+  // department ID (the user's own dept, or the office's pick below).
+  String selectedDept = 'education';
   final dateCtrl = TextEditingController(text: '14/02/2019 ዓ.ም');
   final authorCtrl = TextEditingController(text: 'ተስፋሁን ባይህ');
   final authorRoleCtrl = TextEditingController(text: 'የትምህርት ኃላፊ');
@@ -37,6 +46,34 @@ class _DocumentEditorScreenState extends State<DocumentEditorScreen> {
 
   bool isGenerating = false;
   bool isSaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // A department user always saves under their own department; the
+    // office picks the department in the meta header (default education).
+    final current = AuthService.currentDepartment;
+    if (current != null && !current.isSuperAdmin) {
+      selectedDept = current.id;
+    }
+  }
+
+  /// Departments the save can be filed under: the office picks any
+  /// department; a department user is locked to their own.
+  List<Department> get _deptChoices {
+    if (AuthService.isSuperAdmin) {
+      return Department.allDepartments.where((d) => !d.isSuperAdmin).toList();
+    }
+    final current = AuthService.currentDepartment;
+    return current != null ? [current] : <Department>[];
+  }
+
+  String _deptName(String id) => Department.allDepartments
+      .firstWhere(
+        (d) => d.id == id,
+        orElse: () => Department.allDepartments.first,
+      )
+      .name;
 
   @override
   void dispose() {
@@ -168,7 +205,26 @@ class _DocumentEditorScreenState extends State<DocumentEditorScreen> {
 
       final bytes = await doc.save();
       final fileName = '${title.isEmpty ? 'ሰነድ' : title}.pdf';
-      await Printing.sharePdf(bytes: bytes, filename: fileName);
+      // PR #46: Printing.sharePdf on the web only opens the browser's
+      // print dialog — the "ወደ PDF አውርድ" button looked dead because no
+      // download ever happened. On the web, download the file for real;
+      // on mobile the share sheet still applies.
+      if (kIsWeb) {
+        final ok = await downloadBytes(bytes: bytes, fileName: fileName);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                ok ? 'PDF ወርዷል!' : 'PDF ማውረድ አልተቻለም!',
+              ),
+              backgroundColor:
+                  ok ? AppTheme.greenSuccess : AppTheme.redDanger,
+            ),
+          );
+        }
+      } else {
+        await Printing.sharePdf(bytes: bytes, filename: fileName);
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -208,10 +264,23 @@ class _DocumentEditorScreenState extends State<DocumentEditorScreen> {
       final result = await ApiService().saveDocument(payload);
       if (mounted) {
         if (result['success'] == true) {
-          messenger.showSnackBar(
-            const SnackBar(
-              content: Text('ሰነዱ በማህደር በተሳካ ሁኔታ ተቀምጧል!'),
-              backgroundColor: AppTheme.greenSuccess,
+          // PR #46: the save used to show only a brief snackbar, so
+          // tapping "በማህደር አስቀምጥ" looked like nothing happened. A
+          // confirmation dialog now shows the saved title + department.
+          await showDialog(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('ሰነዱ ተቀምጧል', style: TextStyle(fontSize: 16)),
+              content: Text(
+                '«${wordTitleCtrl.text.trim().isEmpty ? 'ሰነድ' : wordTitleCtrl.text.trim()}»\nክፍል፦ ${_deptName(selectedDept)}\n\nሰነዱ በማህደር በተሳካ ሁኔታ ተቀምጧል።',
+                style: const TextStyle(fontSize: 13),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('ዝጋ'),
+                ),
+              ],
             ),
           );
         } else {
@@ -412,6 +481,28 @@ class _DocumentEditorScreenState extends State<DocumentEditorScreen> {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 12),
+            // PR #46: which department the document is filed under.
+            // The office picks; a department user is locked to their own.
+            DropdownButtonFormField<Department>(
+              value: Department.allDepartments.firstWhere(
+                (d) => d.id == selectedDept,
+                orElse: () => _deptChoices.first,
+              ),
+              decoration: const InputDecoration(
+                labelText: 'ክፍል',
+                isDense: true,
+              ),
+              items: _deptChoices
+                  .map((d) => DropdownMenuItem(
+                        value: d,
+                        child: Text(d.name, style: const TextStyle(fontSize: 13)),
+                      ))
+                  .toList(),
+              onChanged: AuthService.isSuperAdmin
+                  ? (d) => setState(() => selectedDept = d?.id ?? selectedDept)
+                  : null,
             ),
           ],
         ),

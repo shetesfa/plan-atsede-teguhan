@@ -332,10 +332,20 @@ class _PlanCalendarScreenState extends State<PlanCalendarScreen> {
       await PdfGeneratorService.printOrSharePdf(pdfBytes, fileName);
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        // PR #46: the old toast used the default (fixed) behaviour — it
+        // sat on top of the bottom navigation until reload and could
+        // not be dismissed by tapping. Clear any previous toast first,
+        // give it a short life, and let a tap dismiss it at once.
+        final messenger = ScaffoldMessenger.of(context);
+        messenger.clearSnackBars();
+        messenger.showSnackBar(
           SnackBar(
-            content: Text('$fileName በተሳካ ሁኔታ ተዘጋጅቷል!'),
+            content: GestureDetector(
+              onTap: () => messenger.hideCurrentSnackBar(),
+              child: Text('$fileName በተሳካ ሁኔታ ተዘጋጅቷል!'),
+            ),
             backgroundColor: AppTheme.greenSuccess,
+            duration: const Duration(seconds: 5),
             action: SnackBarAction(
               label: 'ወደ ቴሌግራም ላክ',
               textColor: Colors.white,

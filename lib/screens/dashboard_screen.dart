@@ -167,6 +167,14 @@ class DashboardScreen extends StatelessWidget {
                                       'ክፍል፦ ${p.departmentName}\nአዲስ ቀን፦ ${p.postponedDate ?? "ያልተጠቀሰ"}\nምክንያት፦ ${p.postponeReason ?? "ያልተገለጸ"}',
                                       style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                                     ),
+                                    // PR #46: postponed items had NO onTap —
+                                    // tapping them did nothing. They now
+                                    // navigate to Plans like overdue items.
+                                    trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: AppTheme.amberWarning),
+                                    onTap: () {
+                                      Navigator.pop(ctx);
+                                      onSelectDepartment(p.departmentId);
+                                    },
                                   ),
                                 );
                               },
@@ -198,6 +206,14 @@ class DashboardScreen extends StatelessWidget {
                                       'ክፍል፦ ${p.departmentName}\nየተከናወነ፦ ${p.doneDetails ?? "ዝርዝር አለ"}\nደረጃ፦ ${p.progressPercent}% ተጠናቋል',
                                       style: const TextStyle(fontSize: 11, color: AppTheme.textSecondary),
                                     ),
+                                    // PR #46: report items had NO onTap —
+                                    // tapping them did nothing. They now
+                                    // navigate to Plans like overdue items.
+                                    trailing: const Icon(Icons.arrow_forward_ios, size: 14, color: AppTheme.greenSuccess),
+                                    onTap: () {
+                                      Navigator.pop(ctx);
+                                      onSelectDepartment(p.departmentId);
+                                    },
                                   ),
                                 );
                               },

@@ -176,6 +176,12 @@ class AppTheme {
           ),
         ),
       ),
+      // Floating snackbars never cover the bottom navigation bar.
+      // PR #46 (2026-11-28): the default fixed snackbar sat on top of
+      // the navigation and could not be dismissed by tapping it.
+      snackBarTheme: const SnackBarThemeData(
+        behavior: SnackBarBehavior.floating,
+      ),
       textTheme: GoogleFonts.notoSansEthiopicTextTheme().apply(
         bodyColor: textDark,
         displayColor: textDark,
