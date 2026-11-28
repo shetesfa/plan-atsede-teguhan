@@ -50,6 +50,8 @@ dependencies:
   # `flutter pub get` must still resolve it against the other deps.
   flutter_local_notifications: ^18.0.0
   timezone: ^0.10.0
+  # Browser file downloads on the web (real anchor download, not a popup).
+  web: ^1.1.1
 
 dev_dependencies:
   flutter_test:

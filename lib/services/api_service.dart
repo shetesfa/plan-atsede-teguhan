@@ -464,6 +464,23 @@ class ApiService {
     }
   }
 
+  // 6b. ሪፖርት መሰረዝ (Delete Report — super-admin only).
+  // PR #46 (2026-11-28): Office Review had no delete control; the
+  // server DELETE /reports.php already exists (soft delete, audit-logged).
+  Future<bool> deleteReport(String reportId) async {
+    final url = Uri.parse('$baseUrl/reports.php?id=$reportId');
+    try {
+      final res = await http
+          .delete(url, headers: _headers)
+          .timeout(const Duration(seconds: 30));
+      final data = jsonDecode(res.body);
+      return res.statusCode == 200 && data['status'] == 'success';
+    } catch (e) {
+      debugPrint('deleteReport error: $e');
+      return false;
+    }
+  }
+
   // 7b. ተጠቃሚዎች አስተዳደር (Users — super admin only, 2026-11-26)
   Future<List<Map<String, dynamic>>> fetchUsers() async {
     final uri = Uri.parse('$baseUrl/users.php');

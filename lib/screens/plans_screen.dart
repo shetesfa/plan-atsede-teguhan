@@ -7,6 +7,8 @@ import '../models/plan_item.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/excel_importer.dart';
+import '../services/file_download.dart';
+import '../services/office_export_service.dart';
 import '../services/offline_sync_service.dart';
 import '../services/notification_service.dart';
 import '../services/telegram_service.dart';
@@ -38,6 +40,16 @@ class _PlansScreenState extends State<PlansScreen> {
   /// ethiopianMonths13. Defaults to the month we are in (ህዳር).
   int selectedMonthIndex = -1;
   bool isTableView = true;
+
+  // PR #46: visible horizontal scrollbar for the wide plans table, so
+  // the Actions column is reachable without wheel-scrolling blind.
+  final ScrollController _tableScrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _tableScrollController.dispose();
+    super.dispose();
+  }
 
   /// M10፦ የመጨረሻው የአገልጋይ ዝርዝር-ማደስ ስህተት — "server አልተገኘም" ከ "እቅድ የለም"
   /// ለመለየት። null ማለት ስህተት የለም ማለት ነው።
@@ -213,6 +225,16 @@ class _PlansScreenState extends State<PlansScreen> {
   }
 
   Future<void> _pickExcelFile() async {
+    // PR #46: the file picker opens with no visible feedback, so the
+    // button looked dead while the picker was opening.
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('የኤክሴል ፋይል ይምረጡ…'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+    }
     final files = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['xlsx', 'xls'],
@@ -231,6 +253,51 @@ class _PlansScreenState extends State<PlansScreen> {
           );
         }
       }
+    }
+  }
+
+  // እቅዶችን ወደ Excel አውርድ — PR #46 (2026-11-28).
+  // The AppBar used to show only an Excel IMPORT icon (upload_file);
+  // the export generator (OfficeExportService) existed but was never
+  // wired to any button, so the header looked like it had a dead
+  // export icon. This exports the currently filtered plans and
+  // downloads the file for real (web) or saves it (mobile).
+  Future<void> _exportPlansToExcel() async {
+    if (filteredPlans.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ለማውረድ እቅድ የለም!')),
+      );
+      return;
+    }
+    try {
+      final bytes = OfficeExportService.generateExcelFile(
+        plans: filteredPlans,
+        sheetName: 'እቅዶች',
+      );
+      final ok = await downloadBytes(
+        bytes: bytes,
+        fileName: 'የክፍሎች_እቅዶች.xlsx',
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            ok
+                ? 'የኤክሴል ፋይሉ ወርዷል (${filteredPlans.length} እቅዶች)'
+                : 'የኤክሴል ፋይሉን ማውረድ አልተቻለም!',
+          ),
+          backgroundColor:
+              ok ? AppTheme.greenSuccess : AppTheme.redDanger,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('የኤክሴል ፋይሉን ማመንጨት አልተቻለም: $e'),
+          backgroundColor: AppTheme.redDanger,
+        ),
+      );
     }
   }
 
@@ -274,17 +341,38 @@ class _PlansScreenState extends State<PlansScreen> {
     }
   }
 
-  // ── H1(a)፦ አዲስ እቅድ መፍጠሪያ ሞዳል ────────────────────────────────────────
-  void _showCreatePlanDialog() {
-    final titleController = TextEditingController();
-    final descController = TextEditingController();
-    final execTimeController = TextEditingController();
+  // ── H1(a)፦ አዲስ እቅድ መፍጠሪያ / ያለውን እቅድ ማሻሻያ (Edit) ሞዳል ──────────────
+  // PR #46 (2026-11-28): there was no edit control anywhere. The same
+  // dialog now opens pre-filled for editing and saves through the
+  // savePlan upsert the server already supports. Editing sends the FULL
+  // plan payload (like the postpone flow) because plans.php replaces all
+  // fields on update — including the postpone state, so editing a
+  // postponed plan does not silently clear its postpone status.
+  void _showCreatePlanDialog({PlanItem? existing}) {
+    final isEdit = existing != null;
+    final titleController = TextEditingController(
+      text: isEdit ? existing.mainTask : '',
+    );
+    final descController = TextEditingController(
+      text: isEdit ? existing.detailTask : '',
+    );
+    final execTimeController = TextEditingController(
+      text: isEdit ? existing.executionTime : '',
+    );
     final isSuper = AuthService.isSuperAdmin;
     final currentDept = AuthService.currentDepartment;
     // ጽ/ቤት ካልሆነ እቅዱ ለራሱ ክፍል ብቻ ነው የሚፈጠረው (አገልጋዩም ያንኑ ያስገድዳል)።
-    final deptChoices = isSuper
-        ? Department.allDepartments.where((d) => !d.isSuperAdmin).toList()
-        : (currentDept != null ? [currentDept] : <Department>[]);
+    // In edit mode the department is locked: a plan never changes owner.
+    final deptChoices = isEdit
+        ? <Department>[
+            Department.allDepartments.firstWhere(
+              (d) => d.id == existing.departmentId,
+              orElse: () => Department.allDepartments.first,
+            ),
+          ]
+        : isSuper
+            ? Department.allDepartments.where((d) => !d.isSuperAdmin).toList()
+            : (currentDept != null ? [currentDept] : <Department>[]);
     Department? selectedDept = deptChoices.isNotEmpty ? deptChoices.first : null;
     bool isSubmitting = false;
 
@@ -294,11 +382,17 @@ class _PlansScreenState extends State<PlansScreen> {
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-              title: const Row(
+              title: Row(
                 children: [
-                  Icon(Icons.add_task, color: AppTheme.primaryMaroon),
-                  SizedBox(width: 8),
-                  Text('አዲስ እቅድ', style: TextStyle(fontSize: 16)),
+                  Icon(
+                    isEdit ? Icons.edit : Icons.add_task,
+                    color: AppTheme.primaryMaroon,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    isEdit ? 'እቅዱን አስተካክል' : 'አዲስ እቅድ',
+                    style: const TextStyle(fontSize: 16),
+                  ),
                 ],
               ),
               content: SingleChildScrollView(
@@ -325,7 +419,11 @@ class _PlansScreenState extends State<PlansScreen> {
                       items: deptChoices
                           .map((d) => DropdownMenuItem(value: d, child: Text(d.name, style: const TextStyle(fontSize: 13))))
                           .toList(),
-                      onChanged: isSuper ? (d) => setDialogState(() => selectedDept = d) : null,
+                      onChanged: isEdit
+                          ? null
+                          : isSuper
+                              ? (d) => setDialogState(() => selectedDept = d)
+                              : null,
                     ),
                     const SizedBox(height: 12),
                     const Text('የማስፈጸሚያ ጊዜ / ቀን፦', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
@@ -392,6 +490,31 @@ class _PlansScreenState extends State<PlansScreen> {
                             'remarks': '',
                             'progress_percent': 0,
                           };
+                          if (isEdit) {
+                            // Full payload: plans.php replaces ALL fields
+                            // on update, so every unchanged field must be
+                            // sent back — otherwise the edit would blank
+                            // budget/remarks/months and clear a postpone.
+                            // (status/priority/version are left out on
+                            // purpose: the server derives status from
+                            // progress and defaults priority, exactly as
+                            // the postpone flow already does.)
+                            payload.addAll({
+                              'id': existing.id,
+                              'sub_department': existing.subDepartment,
+                              'measurement': existing.measurement,
+                              'quantity': existing.quantity,
+                              'budget': existing.budget,
+                              'remarks': existing.remarks,
+                              'months': existing.months,
+                              'progress_percent': existing.progressPercent,
+                              'is_postponed': existing.isPostponed,
+                              'postponed_date': existing.postponedDate,
+                              'postpone_reason': existing.postponeReason,
+                              'original_execution_time':
+                                  existing.originalExecutionTime,
+                            });
+                          }
 
                           final result = await ApiService().savePlan(payload);
                           if (!context.mounted) return;
@@ -402,8 +525,12 @@ class _PlansScreenState extends State<PlansScreen> {
                             await _trySyncPending();
                             if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('አዲስ እቅድ በአገልጋዩ ላይ በተሳካ ሁኔታ ተመዝግቧል!'),
+                                SnackBar(
+                                  content: Text(
+                                    isEdit
+                                        ? 'እቅዱ ተስተካክሏል!'
+                                        : 'አዲስ እቅድ በአገልጋዩ ላይ በተሳካ ሁኔታ ተመዝግቧል!',
+                                  ),
                                   backgroundColor: AppTheme.greenSuccess,
                                 ),
                               );
@@ -413,7 +540,7 @@ class _PlansScreenState extends State<PlansScreen> {
                             // "ተመዝግቧል" መልእክት በጭራሽ አይታይም (H1/H5)።
                             await OfflineSyncService.enqueueChange(
                               entityType: 'plan',
-                              action: 'insert',
+                              action: isEdit ? 'update' : 'insert',
                               data: payload,
                               departmentId: selectedDept!.id,
                             );
@@ -430,7 +557,7 @@ class _PlansScreenState extends State<PlansScreen> {
                         },
                   child: isSubmitting
                       ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                      : const Text('እቅዱን መዝግብ'),
+                      : Text(isEdit ? 'ለውጦቹን አስቀምጥ' : 'እቅዱን መዝግብ'),
                 ),
               ],
             );
@@ -745,10 +872,13 @@ class _PlansScreenState extends State<PlansScreen> {
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
+                                // PR #46: the remove button had zero
+                                // padding + empty constraints — a ~18px
+                                // hit target, so taps just off-centre
+                                // missed silently. Full 48px target now.
                                 IconButton(
                                   icon: const Icon(Icons.close, size: 18),
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(),
+                                  tooltip: 'አባሪ አስወግድ',
                                   onPressed: () => setModalState(() => pickedAttachments.remove(att)),
                                 ),
                               ],
@@ -1217,6 +1347,12 @@ class _PlansScreenState extends State<PlansScreen> {
             tooltip: isTableView ? 'ወደ ካርድ እይታ ቀይር' : 'ወደ ሰንጠረዥ እይታ ቀይር',
             onPressed: () => setState(() => isTableView = !isTableView),
           ),
+          // PR #46: the export generator existed but no button called it.
+          IconButton(
+            icon: const Icon(Icons.download),
+            tooltip: 'እቅዶች ወደ Excel አውጣ',
+            onPressed: _exportPlansToExcel,
+          ),
           IconButton(
             icon: const Icon(Icons.add_task),
             tooltip: 'አዲስ እቅድ',
@@ -1414,14 +1550,23 @@ class _PlansScreenState extends State<PlansScreen> {
   Widget _buildExcelTableView() {
     return SingleChildScrollView(
       scrollDirection: Axis.vertical,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: DataTable(
-          headingRowColor: WidgetStateProperty.all(const Color(0xFF530A14)),
-          headingTextStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-          dataRowMinHeight: 48,
-          dataRowMaxHeight: 64,
-          columnSpacing: 14,
+      // PR #46: a visible horizontal scrollbar — the table is wider
+      // than the screen and the Actions column was only reachable by
+      // wheel-scrolling right with no visual cue.
+      child: Scrollbar(
+        controller: _tableScrollController,
+        thumbVisibility: true,
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          controller: _tableScrollController,
+          child: DataTable(
+            headingRowColor: WidgetStateProperty.all(const Color(0xFF530A14)),
+            headingTextStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+            dataRowMinHeight: 48,
+            dataRowMaxHeight: 64,
+            // PR #46: tighter spacing + narrower task columns so more
+            // of the table (including Actions) fits on a desktop width.
+            columnSpacing: 10,
           border: TableBorder.all(color: Colors.grey.shade300, width: 0.5),
           // Excel header (2026-11-25): the table shows the same columns
           // as the 2019 Excel — ተ.ቁ | ክፍል | ንዑስ ክፍል | ዐቢይ ተግባራት |
@@ -1462,7 +1607,7 @@ class _PlansScreenState extends State<PlansScreen> {
                 DataCell(Text(item.subDepartment, style: const TextStyle(fontSize: 11))),
                 DataCell(
                   SizedBox(
-                    width: 200,
+                    width: 160,
                     child: Text(
                       item.mainTask,
                       style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
@@ -1473,7 +1618,7 @@ class _PlansScreenState extends State<PlansScreen> {
                 ),
                 DataCell(
                   SizedBox(
-                    width: 250,
+                    width: 200,
                     child: Text(
                       item.detailTask.isNotEmpty ? item.detailTask : item.mainTask,
                       style: const TextStyle(fontSize: 11),
@@ -1556,6 +1701,14 @@ class _PlansScreenState extends State<PlansScreen> {
                         tooltip: 'እቅድ አስተላልፍ (ቀን ቀይር)',
                         onPressed: () => _showPostponeDialog(item),
                       ),
+                      // PR #46: plan edit — same RBAC gate as delete
+                      // (super-admin any dept, dept_admin own dept).
+                      if (AuthService.canManagePlan(item.departmentId))
+                        IconButton(
+                          icon: const Icon(Icons.edit_outlined, size: 18, color: AppTheme.primaryMaroon),
+                          tooltip: 'እቅድ አስተካክል',
+                          onPressed: () => _showCreatePlanDialog(existing: item),
+                        ),
                       if (AuthService.canManagePlan(item.departmentId))
                         IconButton(
                           icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
@@ -1568,6 +1721,7 @@ class _PlansScreenState extends State<PlansScreen> {
               ],
             );
           }),
+          ),
         ),
       ),
     );
@@ -1805,7 +1959,7 @@ class _PlansScreenState extends State<PlansScreen> {
                 const Divider(height: 1),
                 const SizedBox(height: 6),
 
-                // እርምጃዎች (ሪፖርት ስጥ እና ቀን ቀይር)
+                // እርምጃዎች (አስተካክል፣ ሪፖርት ስጥ እና ቀን ቀይር)
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
@@ -1814,6 +1968,13 @@ class _PlansScreenState extends State<PlansScreen> {
                         onPressed: () => _deletePlan(item),
                         icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
                         tooltip: 'እቅድ ሰርዝ',
+                      ),
+                    // PR #46: plan edit — same RBAC gate as delete.
+                    if (AuthService.canManagePlan(item.departmentId))
+                      TextButton.icon(
+                        onPressed: () => _showCreatePlanDialog(existing: item),
+                        icon: const Icon(Icons.edit_outlined, size: 15, color: AppTheme.primaryMaroon),
+                        label: const Text('አስተካክል', style: TextStyle(fontSize: 11, color: AppTheme.primaryMaroon)),
                       ),
                     TextButton.icon(
                       onPressed: () => _showPostponeDialog(item),

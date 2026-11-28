@@ -46,6 +46,54 @@ class _OfficeReportsScreenState extends State<OfficeReportsScreen> {
     });
   }
 
+  // PR #46 (2026-11-28): Office Review had no report delete control.
+  // Server DELETE /reports.php is super-admin only (soft delete,
+  // audit-logged); the control department (can_view_all, view-only)
+  // deliberately gets no delete button.
+  Future<void> _deleteReport(Map<String, dynamic> report) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('ሪፖርቱን መሰረዝ ይፈልጋሉ?', style: TextStyle(fontSize: 16)),
+        content: Text(
+          '«${report['plan_title'] ?? 'ሪፖርት'}»\n\nይህ ሪፖርት ከአገልጋዩ ላይ በቋሚነት ይሰረዛል።',
+          style: const TextStyle(fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('ይቅር'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.redDanger),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('አዎ፣ ሰርዝ', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+
+    final ok = await ApiService().deleteReport((report['id'] ?? '').toString());
+    if (!mounted) return;
+    if (ok) {
+      await _loadReports();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('ሪፖርቱ ተሰርዟል!'),
+          backgroundColor: AppTheme.greenSuccess,
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('ሪፖርቱን መሰረዝ አልተቻለም!'),
+          backgroundColor: AppTheme.redDanger,
+        ),
+      );
+    }
+  }
+
   // ── 2026-11-26: report attachment open/download ─────────────────────
   // files.php serves the file by attachment id (auth-guarded: own
   // department, super admin, or can_view_all). Images preview in-app,
@@ -489,16 +537,27 @@ class _OfficeReportsScreenState extends State<OfficeReportsScreen> {
                                         style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppTheme.primaryMaroon),
                                       ),
                                       if (AuthService.isSuperAdmin)
-                                        ElevatedButton.icon(
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: AppTheme.primaryMaroon,
-                                            foregroundColor: Colors.white,
-                                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                          ),
-                                          icon: const Icon(Icons.rate_review, size: 16),
-                                          label: const Text('ገምግም / ውሳኔ ስጥ', style: TextStyle(fontSize: 12)),
-                                          onPressed: () => _showReviewDialog(r),
+                                        Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            ElevatedButton.icon(
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: AppTheme.primaryMaroon,
+                                                foregroundColor: Colors.white,
+                                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                              ),
+                                              icon: const Icon(Icons.rate_review, size: 16),
+                                              label: const Text('ገምግም / ውሳኔ ስጥ', style: TextStyle(fontSize: 12)),
+                                              onPressed: () => _showReviewDialog(r),
+                                            ),
+                                            const SizedBox(width: 4),
+                                            IconButton(
+                                              icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                                              tooltip: 'ሪፖርት ሰርዝ',
+                                              onPressed: () => _deleteReport(r),
+                                            ),
+                                          ],
                                         ),
                                     ],
                                   ),

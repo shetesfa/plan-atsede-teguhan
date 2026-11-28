@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../models/plan_item.dart';
 import '../models/unplanned_activity.dart';
@@ -40,10 +42,49 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   bool _isOffline = false;
   String? _lastSyncText;
 
+  // PR #46 (item 13): load token — overlapping loads (startup +
+  // pull-to-refresh) must not interleave: only the newest load may
+  // apply its results. Without this, a stale cache read landing after
+  // a fresh server result made the plan count swing between reloads.
+  int _plansLoadToken = 0;
+
+  // PR #46 (item 15): cold first load — when the server is still waking
+  // and there is no cache, the app used to sit on the error screen until
+  // the user tapped retry. It now retries by itself twice, 15 seconds
+  // apart, with a countdown on screen.
+  Timer? _errorRetryTimer;
+  int _errorAutoRetriesLeft = 2;
+  int _errorRetryInSeconds = 0;
+
   @override
   void initState() {
     super.initState();
     _loadInitialPlans();
+  }
+
+  @override
+  void dispose() {
+    _errorRetryTimer?.cancel();
+    super.dispose();
+  }
+
+  void _scheduleErrorAutoRetry() {
+    _errorRetryTimer?.cancel();
+    if (_errorAutoRetriesLeft <= 0 || !mounted) return;
+    setState(() => _errorRetryInSeconds = 15);
+    _errorRetryTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted || _serverError == null) {
+        timer.cancel();
+        return;
+      }
+      if (_errorRetryInSeconds > 1) {
+        setState(() => _errorRetryInSeconds--);
+      } else {
+        timer.cancel();
+        _errorAutoRetriesLeft--;
+        _loadInitialPlans(isAutoRetry: true);
+      }
+    });
   }
 
   // 2026-11-26 (startup fix): OFFLINE-FIRST — show the cached plans
@@ -51,21 +92,31 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   // retries itself while the Render server wakes). The full-screen
   // "server not found" error appears ONLY when there is truly no cache
   // AND the server is unreachable after retries.
-  Future<void> _loadInitialPlans() async {
+  Future<void> _loadInitialPlans({bool isAutoRetry = false}) async {
+    // Only the newest load may apply its results (item 13); a manual
+    // load resets the auto-retry budget, an auto-retry does not.
+    final loadToken = ++_plansLoadToken;
+    bool isCurrent() => mounted && loadToken == _plansLoadToken;
+    _errorRetryTimer?.cancel();
+    if (!isAutoRetry) _errorAutoRetriesLeft = 2;
     if (mounted) {
       setState(() {
         isLoading = true;
         _serverError = null;
+        _errorRetryInSeconds = 0;
       });
     }
     final deptId = AuthService.currentDepartment?.id ?? 'admin';
     // 1. Cached plans first — the app opens instantly, even offline.
+    // PR #46: apply the cache only when the list is still empty, so a
+    // stale cache read can never overwrite a fresher server list.
     var cached = <Map<String, dynamic>>[];
     try {
       cached = await OfflineSyncService.getCachedPlans(deptId);
     } catch (_) {}
-    if (cached.isNotEmpty && mounted) {
+    if (cached.isNotEmpty && plans.isEmpty && isCurrent()) {
       final lastSync = await OfflineSyncService.getLastSyncTime();
+      if (!isCurrent()) return;
       setState(() {
         plans = cached.map((d) => PlanItem.fromDbJson(d)).toList();
         isLoading = false;
@@ -78,9 +129,10 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     // 2. Server refresh in the background (retries inside fetchPlans).
     try {
       final remoteData = await ApiService().fetchPlans();
+      if (!isCurrent()) return;
       final dbPlans = remoteData.map((d) => PlanItem.fromDbJson(d)).toList();
       await OfflineSyncService.cachePlans(deptId, remoteData);
-      if (!mounted) return;
+      if (!isCurrent()) return;
       setState(() {
         plans = dbPlans;
         isLoading = false;
@@ -91,6 +143,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
       // Server still unreachable after retries — keep the cached plans
       // on screen (offline banner); only show the error when no cache
       // exists at all.
+      if (!isCurrent()) return;
       if (cached.isNotEmpty) {
         if (mounted) {
           setState(() {
@@ -99,9 +152,10 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           });
         }
       } else {
-        await _loadFromCacheOrError(deptId, e.message);
+        await _loadFromCacheOrError(deptId, e.message, loadToken);
       }
     } catch (e) {
+      if (!isCurrent()) return;
       if (cached.isNotEmpty) {
         if (mounted) {
           setState(() {
@@ -110,10 +164,10 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           });
         }
       } else {
-        await _loadFromCacheOrError(deptId, e.toString());
+        await _loadFromCacheOrError(deptId, e.toString(), loadToken);
       }
     }
-    await _loadUnplannedActivities();
+    if (isCurrent()) await _loadUnplannedActivities();
   }
 
   /// ያልታቀዱ ስራዎች ከሰርቨር ይጫናሉ (2026-11-26: server storage —
@@ -149,14 +203,18 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   /// Server unreachable: show the last synced plans (offline) when any
   /// are cached; only show the error screen when nothing is cached yet
   /// (e.g. first launch with no internet).
-  Future<void> _loadFromCacheOrError(String deptId, String message) async {
+  Future<void> _loadFromCacheOrError(
+    String deptId,
+    String message,
+    int loadToken,
+  ) async {
     final cached = await OfflineSyncService.getCachedPlans(deptId);
-    if (!mounted) return;
+    if (!mounted || loadToken != _plansLoadToken) return;
     if (cached.isNotEmpty) {
       final lastSync = await OfflineSyncService.getLastSyncTime();
-      final dbPlans = cached.map((d) => PlanItem.fromDbJson(d)).toList();
+      if (!mounted || loadToken != _plansLoadToken) return;
       setState(() {
-        plans = dbPlans;
+        plans = cached.map((d) => PlanItem.fromDbJson(d)).toList();
         isLoading = false;
         _isOffline = true;
         _lastSyncText =
@@ -170,6 +228,9 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
         isLoading = false;
         _isOffline = false;
       });
+      // PR #46 (item 15): the cold server may still be waking — retry
+      // on our own instead of leaving the user on the error screen.
+      _scheduleErrorAutoRetry();
     }
   }
 
@@ -269,6 +330,23 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
               'message': res['message'] ?? 'ስራውን ማሻሻል አልተቻለም'
             };
           },
+          // PR #46: delete an unplanned activity — server first, then
+          // drop it from the parent list (the screen keeps its own
+          // copy too and removes it at once).
+          onDeleteActivity: (act) async {
+            final ok = await ApiService().deleteUnplannedActivity(act.id);
+            if (ok) {
+              if (mounted) {
+                setState(() =>
+                    unplannedActivities.removeWhere((a) => a.id == act.id));
+              }
+              return {'success': true};
+            }
+            return {
+              'success': false,
+              'message': 'ስራውን መሰረዝ አልተቻለም'
+            };
+          },
         ),
       ),
     );
@@ -338,6 +416,16 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 13),
                 ),
+                // PR #46 (item 15): the app retries by itself twice while
+                // the cold server wakes — this countdown shows it.
+                if (_errorAutoRetriesLeft > 0 && _errorRetryInSeconds > 0) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    'በራስ-ሰር እንደገና እየሞከርን ነው… ($_errorRetryInSeconds ሰከንድ)',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(fontSize: 12, color: AppTheme.textMuted),
+                  ),
+                ],
                 const SizedBox(height: 16),
                 ElevatedButton(
                   onPressed: _loadInitialPlans,

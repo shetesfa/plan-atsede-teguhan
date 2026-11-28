@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models/department.dart';
 import '../models/unplanned_activity.dart';
+import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../theme/app_theme.dart';
 
@@ -22,6 +24,11 @@ class UnplannedActivitiesScreen extends StatefulWidget {
     String? evidenceBase64,
     String? evidenceName,
   }) onUpdateActivity;
+  // PR #46: delete an unplanned activity (server DELETE /unplanned.php —
+  // super-admin or dept_admin of the activity's own department).
+  final Future<Map<String, dynamic>> Function(
+    UnplannedActivity activity,
+  ) onDeleteActivity;
   // Shown in the empty state when the server list could not be loaded
   // (the list stays empty — no stale data is shown).
   final String? loadError;
@@ -31,6 +38,7 @@ class UnplannedActivitiesScreen extends StatefulWidget {
     required this.activities,
     required this.onAddActivity,
     required this.onUpdateActivity,
+    required this.onDeleteActivity,
     this.loadError,
   });
 
@@ -39,6 +47,128 @@ class UnplannedActivitiesScreen extends StatefulWidget {
 }
 
 class _UnplannedActivitiesScreenState extends State<UnplannedActivitiesScreen> {
+  // PR #46: the screen keeps its OWN copy of the list. Before, the list
+  // came only from the parent via the constructor; the parent updated
+  // its list after approve/add, but the pushed route is built once and
+  // never rebuilt, so approve showed no visible change until a full
+  // page reload. Local state + a server refresh after every mutation
+  // fix that.
+  late List<UnplannedActivity> _activities;
+
+  @override
+  void initState() {
+    super.initState();
+    _activities = List<UnplannedActivity>.from(widget.activities);
+  }
+
+  @override
+  void didUpdateWidget(UnplannedActivitiesScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.activities, widget.activities)) {
+      _activities = List<UnplannedActivity>.from(widget.activities);
+    }
+  }
+
+  /// Re-read the list from the server (source of truth after add /
+  /// approve / delete). A failed refresh keeps the local list — it must
+  /// never blank the screen.
+  Future<void> _refreshActivities() async {
+    try {
+      final remote = await ApiService().fetchUnplannedActivities();
+      if (!mounted) return;
+      setState(() {
+        _activities =
+            remote.map((d) => UnplannedActivity.fromDbJson(d)).toList();
+      });
+    } catch (_) {
+      // Keep the local list.
+    }
+  }
+
+  /// Approve one activity (office only): server first, then update the
+  /// LOCAL list immediately so the status chip changes right away.
+  Future<void> _approveActivity(UnplannedActivity act) async {
+    // Server FIRST: approve only after the server confirms — the local
+    // copy is never mutated before the save.
+    final updated = UnplannedActivity.fromJson({
+      ...act.toJson(),
+      'status': 'በፅ/ቤት ጸድቋል',
+    });
+    final res = await widget.onUpdateActivity(updated);
+    if (!mounted) return;
+    if (res['success'] == true) {
+      setState(() {
+        final idx = _activities.indexWhere((a) => a.id == act.id);
+        if (idx != -1) _activities[idx] = updated;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('ስራው በፅ/ቤት ጸድቋል!'),
+          backgroundColor: AppTheme.greenSuccess,
+        ),
+      );
+      unawaited(_refreshActivities());
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'ስራውን ማጽደቅ አልተቻለም፦ ${res['message'] ?? 'እባክዎ እንደገና ይሞክሩ።'}',
+          ),
+          backgroundColor: AppTheme.redDanger,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    }
+  }
+
+  /// Delete one activity (office, or own-department admin): confirm
+  /// first, server first, then drop it from the local list at once.
+  Future<void> _deleteActivity(UnplannedActivity act) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('ስራውን መሰረዝ ይፈልጋሉ?', style: TextStyle(fontSize: 16)),
+        content: Text(
+          '«${act.title}»\n\nይህ ስራ ከአገልጋዩ ላይ በቋሚነት ይሰረዛል።',
+          style: const TextStyle(fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('ይቅር'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.redDanger),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('አዎ፣ ሰርዝ', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+    final res = await widget.onDeleteActivity(act);
+    if (!mounted) return;
+    if (res['success'] == true) {
+      setState(() => _activities.removeWhere((a) => a.id == act.id));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('ስራው ተሰርዟል!'),
+          backgroundColor: AppTheme.greenSuccess,
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'ስራውን መሰረዝ አልተቻለም፦ ${res['message'] ?? 'እባክዎ እንደገና ይሞክሩ።'}',
+          ),
+          backgroundColor: AppTheme.redDanger,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+    }
+  }
+
   void _showAddDialog() {
     final currentDept = AuthService.currentDepartment;
     String deptName = currentDept?.name ?? 'ልማትና በጎ አድራጎት ክፍል';
@@ -76,13 +206,26 @@ class _UnplannedActivitiesScreenState extends State<UnplannedActivitiesScreen> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'ያልታቀደ ግን የተከናወነ ስራ መመዝገቢያ',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: AppTheme.primaryMaroon,
-                      ),
+                    // PR #46: an X close target at the top — the sheet
+                    // had no cancel control at all (backdrop only).
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'ያልታቀደ ግን የተከናወነ ስራ መመዝገቢያ',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: AppTheme.primaryMaroon,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close),
+                          tooltip: 'ዝጋ',
+                          onPressed: () => Navigator.pop(ctx),
+                        ),
+                      ],
                     ),
                     const Divider(),
                     const SizedBox(height: 6),
@@ -155,80 +298,98 @@ class _UnplannedActivitiesScreenState extends State<UnplannedActivitiesScreen> {
                     ),
                     const SizedBox(height: 20),
 
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: isSaving
-                            ? null
-                            : () async {
-                                if (titleCtrl.text.trim().isEmpty) return;
+                    // PR #46: the sheet had no cancel button — backdrop
+                    // tap was the only way out. Cancel + save side by
+                    // side now.
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: isSaving ? null : () => Navigator.pop(ctx),
+                            child: const Text('ይቅር'),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          flex: 2,
+                          child: ElevatedButton(
+                            onPressed: isSaving
+                                ? null
+                                : () async {
+                                    if (titleCtrl.text.trim().isEmpty) return;
 
-                                setDlgState(() => isSaving = true);
-                                String? evidenceBase64;
-                                String? evidenceName;
-                                try {
-                                  // The photo bytes are read here and sent
-                                  // to the server with the record — the
-                                  // dialog never claims a save before the
-                                  // server confirms it.
-                                  if (pickedPhoto != null) {
-                                    final bytes =
-                                        await pickedPhoto!.readAsBytes();
-                                    evidenceBase64 = base64Encode(bytes);
-                                    evidenceName = pickedPhoto!.name;
-                                  }
+                                    setDlgState(() => isSaving = true);
+                                    String? evidenceBase64;
+                                    String? evidenceName;
+                                    try {
+                                      // The photo bytes are read here and sent
+                                      // to the server with the record — the
+                                      // dialog never claims a save before the
+                                      // server confirms it.
+                                      if (pickedPhoto != null) {
+                                        final bytes =
+                                            await pickedPhoto!.readAsBytes();
+                                        evidenceBase64 = base64Encode(bytes);
+                                        evidenceName = pickedPhoto!.name;
+                                      }
 
-                                  final act = UnplannedActivity(
-                                    id: 'unplanned_${DateTime.now().millisecondsSinceEpoch}',
-                                    departmentId: deptId,
-                                    departmentName: deptName,
-                                    title: titleCtrl.text.trim(),
-                                    description: descCtrl.text.trim(),
-                                    executionDate: dateCtrl.text.trim(),
-                                    budgetUsed: budgetCtrl.text.trim(),
-                                  );
+                                      final act = UnplannedActivity(
+                                        id: 'unplanned_${DateTime.now().millisecondsSinceEpoch}',
+                                        departmentId: deptId,
+                                        departmentName: deptName,
+                                        title: titleCtrl.text.trim(),
+                                        description: descCtrl.text.trim(),
+                                        executionDate: dateCtrl.text.trim(),
+                                        budgetUsed: budgetCtrl.text.trim(),
+                                      );
 
-                                  final res = await widget.onAddActivity(
-                                    act,
-                                    evidenceBase64: evidenceBase64,
-                                    evidenceName: evidenceName,
-                                  );
-                                  if (!context.mounted) return;
-                                  if (res['success'] == true) {
-                                    Navigator.pop(ctx);
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text('ያልታቀደው የስራ ክንውን በተሳካ ሁኔታ ተመዝግቧል!'),
-                                        backgroundColor: AppTheme.greenSuccess,
-                                      ),
-                                    );
-                                  } else {
-                                    // Server (or network) failed — the
-                                    // dialog stays open, nothing is lost.
-                                    setDlgState(() => isSaving = false);
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text(
-                                            'ስራውን መመዝገብ አልተቻለም፦ ${res['message'] ?? 'እባክዎ እንደገና ይሞክሩ።'}'),
-                                        backgroundColor: AppTheme.redDanger,
-                                        duration: const Duration(seconds: 5),
-                                      ),
-                                    );
-                                  }
-                                } catch (e) {
-                                  if (!context.mounted) return;
-                                  setDlgState(() => isSaving = false);
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text('ስራውን መመዝገብ አልተቻለም፦ $e'),
-                                      backgroundColor: AppTheme.redDanger,
-                                      duration: const Duration(seconds: 5),
-                                    ),
-                                  );
-                                }
-                              },
-                        child: Text(isSaving ? 'በመላክ ላይ…' : 'መዝግብ እና ለፅ/ቤት ላክ'),
-                      ),
+                                      final res = await widget.onAddActivity(
+                                        act,
+                                        evidenceBase64: evidenceBase64,
+                                        evidenceName: evidenceName,
+                                      );
+                                      if (!context.mounted) return;
+                                      if (res['success'] == true) {
+                                        Navigator.pop(ctx);
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(
+                                            content: Text('ያልታቀደው የስራ ክንውን በተሳካ ሁኔታ ተመዝግቧል!'),
+                                            backgroundColor: AppTheme.greenSuccess,
+                                          ),
+                                        );
+                                        // The new item must appear right
+                                        // away — the parent's list update
+                                        // alone does not rebuild this route.
+                                        unawaited(_refreshActivities());
+                                      } else {
+                                        // Server (or network) failed — the
+                                        // dialog stays open, nothing is lost.
+                                        setDlgState(() => isSaving = false);
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(
+                                            content: Text(
+                                                'ስራውን መመዝገብ አልተቻለም፦ ${res['message'] ?? 'እባክዎ እንደገና ይሞክሩ።'}'),
+                                            backgroundColor: AppTheme.redDanger,
+                                            duration: const Duration(seconds: 5),
+                                          ),
+                                        );
+                                      }
+                                    } catch (e) {
+                                      if (!context.mounted) return;
+                                      setDlgState(() => isSaving = false);
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text('ስራውን መመዝገብ አልተቻለም፦ $e'),
+                                          backgroundColor: AppTheme.redDanger,
+                                          duration: const Duration(seconds: 5),
+                                        ),
+                                      );
+                                    }
+                                  },
+                            child: Text(isSaving ? 'በመላክ ላይ…' : 'መዝግብ እና ለፅ/ቤት ላክ'),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -266,8 +427,8 @@ class _UnplannedActivitiesScreenState extends State<UnplannedActivitiesScreen> {
     final currentDept = AuthService.currentDepartment;
 
     final visibleActivities = isSuper
-        ? widget.activities
-        : widget.activities.where((a) => a.departmentName.contains(currentDept?.shortName ?? '') || a.departmentId == currentDept?.id).toList();
+        ? _activities
+        : _activities.where((a) => a.departmentName.contains(currentDept?.shortName ?? '') || a.departmentId == currentDept?.id).toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -371,44 +532,31 @@ class _UnplannedActivitiesScreenState extends State<UnplannedActivitiesScreen> {
                             Text('ወጪ፡ ${act.budgetUsed} ብር', style: const TextStyle(fontSize: 11)),
                           ],
                         ),
-                        if (isSuper && act.status != 'በፅ/ቤት ጸድቋል') ...[
+                        // PR #46: action row — approve (office only,
+                        // unapproved items) and delete (office, or the
+                        // own-department admin). Approve used to call
+                        // the parent callback only; the pushed route
+                        // never rebuilt, so nothing visibly changed
+                        // until a full reload — _approveActivity now
+                        // updates this screen's own list at once.
+                        if ((isSuper && act.status != 'በፅ/ቤት ጸድቋል') ||
+                            AuthService.canManagePlan(act.departmentId)) ...[
                           const Divider(height: 16),
                           Row(
                             mainAxisAlignment: MainAxisAlignment.end,
                             children: [
-                              TextButton.icon(
-                                onPressed: () async {
-                                  // Server FIRST: approve only after the
-                                  // server confirms — the local copy is
-                                  // never mutated before the save.
-                                  final updated =
-                                      UnplannedActivity.fromJson({
-                                    ...act.toJson(),
-                                    'status': 'በፅ/ቤት ጸድቋል',
-                                  });
-                                  final res = await widget
-                                      .onUpdateActivity(updated);
-                                  if (!context.mounted) return;
-                                  if (res['success'] == true) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                          content:
-                                              Text('ስራው በፅ/ቤት ጸድቋል!')),
-                                    );
-                                  } else {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(
-                                        content: Text(
-                                            'ስራውን ማጽደቅ አልተቻለም፦ ${res['message'] ?? 'እባክዎ እንደገና ይሞክሩ።'}'),
-                                        backgroundColor: AppTheme.redDanger,
-                                        duration: const Duration(seconds: 5),
-                                      ),
-                                    );
-                                  }
-                                },
-                                icon: const Icon(Icons.check, size: 16, color: AppTheme.greenSuccess),
-                                label: const Text('አጽድቅ', style: TextStyle(color: AppTheme.greenSuccess)),
-                              ),
+                              if (isSuper && act.status != 'በፅ/ቤት ጸድቋል')
+                                TextButton.icon(
+                                  onPressed: () => _approveActivity(act),
+                                  icon: const Icon(Icons.check, size: 16, color: AppTheme.greenSuccess),
+                                  label: const Text('አጽድቅ', style: TextStyle(color: AppTheme.greenSuccess)),
+                                ),
+                              if (AuthService.canManagePlan(act.departmentId))
+                                IconButton(
+                                  icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                                  tooltip: 'ስራ ሰርዝ',
+                                  onPressed: () => _deleteActivity(act),
+                                ),
                             ],
                           ),
                         ],
