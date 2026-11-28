@@ -235,11 +235,31 @@ class TelegramService {
   }
 
   /// የጽሑፍ ማሳወቂያ ወደ ቴሌግራም መላክ (በቀጥታ እና በደመና Proxy ባለሁለት አማራጭ)
+  ///
+  /// relayAction ሲሰጥ፣ መልእክቱ መጀመሪያ በሰርቨር relay (notify.php)
+  /// በኩል ይላካል (2026-11-28) — bot token እና chat ID አያስፈልጉም፤
+  /// target chat ከሰርቨር በኩል ብቻ ነው። ካልተሳካ ወደ ቀደሙት መንገዶች ይመለሳል።
   static Future<bool> sendMessage({
     required String text,
     String? targetChatId,
     String parseMode = 'HTML',
+    String? relayAction,
+    String? relayReportId,
   }) async {
+    // አማራጭ 0፦ በሰርቨር relay በኩል (token አያስፈልግም)።
+    if (relayAction != null) {
+      try {
+        final relayed = await ApiService().sendTelegramRelay(
+          action: relayAction,
+          message: text,
+          reportId: relayReportId,
+        );
+        if (relayed) return true;
+      } catch (e) {
+        debugPrint('Server relay send failed, falling back: $e');
+      }
+    }
+
     final chatId = targetChatId ?? savedChatId;
     if (chatId == null || chatId.isEmpty) {
       // H4: Chat ID ካልተዋቀረ ወደ ማንም ሰው chat በ fallback አንልክም —
@@ -544,6 +564,22 @@ class TelegramService {
     final dateStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
     buffer.writeln('📅 <i>ሪፖርት የተላከበት ሰዓት፦ $dateStr</i>');
 
+    // 2026-11-28 (relay)፦ መጀመሪያ በሰርቨር relay በኩል ይሞከራል
+    // (token አያስፈልግም)፤ report_id ሲኖር የጽ/ቤት approve/reject
+    // አዝራሮች ይያያዛሉ። ካልተሳካ ወደ ቀጥታ send_notice ይመለሳል።
+    if (reportId != null) {
+      try {
+        final relayed = await ApiService().sendTelegramRelay(
+          action: 'report_notice',
+          message: buffer.toString(),
+          reportId: reportId,
+        );
+        if (relayed) return true;
+      } catch (e) {
+        debugPrint('Server relay report notice failed, falling back: $e');
+      }
+    }
+
     // PR #31፦ reportId ሲኖር፣ በ bot server /api/send_notice በኩል
     // ከሪፖርት መታወቂያ ጋር መላክ ይሞከራል፤ ካልተሳካ ወደ sendMessage ይመለሳል።
     if (reportId != null && savedChatId != null && savedChatId!.isNotEmpty && botToken.isNotEmpty) {
@@ -590,7 +626,8 @@ class TelegramService {
     buffer.writeln('');
     buffer.writeln('📌 <i>ለጽ/ቤት እና ለአመራሮች ይፋዊ መረጃ የቀረበ</i>');
 
-    return await sendMessage(text: buffer.toString());
+    // 2026-11-28: ማስተላለፍ ማሳወቂያውም በሰርቨር relay በኩል ይላካል።
+    return await sendMessage(text: buffer.toString(), relayAction: 'report_notice');
   }
 }
 
