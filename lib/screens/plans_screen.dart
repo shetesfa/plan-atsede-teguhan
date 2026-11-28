@@ -350,20 +350,23 @@ class _PlansScreenState extends State<PlansScreen> {
   // postponed plan does not silently clear its postpone status.
   void _showCreatePlanDialog({PlanItem? existing}) {
     final isEdit = existing != null;
+    // NOTE: Dart does NOT promote `existing` through the `isEdit` bool
+    // alias — every access below uses `?.` or a direct `existing != null`
+    // check, or the analyzer fails (this broke CI on the first push).
     final titleController = TextEditingController(
-      text: isEdit ? existing.mainTask : '',
+      text: existing?.mainTask ?? '',
     );
     final descController = TextEditingController(
-      text: isEdit ? existing.detailTask : '',
+      text: existing?.detailTask ?? '',
     );
     final execTimeController = TextEditingController(
-      text: isEdit ? existing.executionTime : '',
+      text: existing?.executionTime ?? '',
     );
     final isSuper = AuthService.isSuperAdmin;
     final currentDept = AuthService.currentDepartment;
     // ጽ/ቤት ካልሆነ እቅዱ ለራሱ ክፍል ብቻ ነው የሚፈጠረው (አገልጋዩም ያንኑ ያስገድዳል)።
     // In edit mode the department is locked: a plan never changes owner.
-    final deptChoices = isEdit
+    final deptChoices = existing != null
         ? <Department>[
             Department.allDepartments.firstWhere(
               (d) => d.id == existing.departmentId,
@@ -490,7 +493,9 @@ class _PlansScreenState extends State<PlansScreen> {
                             'remarks': '',
                             'progress_percent': 0,
                           };
-                          if (isEdit) {
+                          // Direct null check (not `isEdit`): only this
+                          // promotes `existing` for the analyzer.
+                          if (existing != null) {
                             // Full payload: plans.php replaces ALL fields
                             // on update, so every unchanged field must be
                             // sent back — otherwise the edit would blank
