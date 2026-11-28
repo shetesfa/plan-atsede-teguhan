@@ -101,6 +101,43 @@ class _PlanCalendarScreenState extends State<PlanCalendarScreen> {
     return v.isEmpty ? null : v;
   }
 
+  /// Office decision colour — the exact mapping the Office Review
+  /// screen uses (office_reports_screen.dart).
+  Color _officeStatusColor(String status) {
+    if (status == 'approved') return AppTheme.greenSuccess;
+    if (status == 'revision_requested') return Colors.orange;
+    if (status == 'rejected') return AppTheme.redDanger;
+    if (status == 'under_review') return Colors.purple;
+    return Colors.blue;
+  }
+
+  /// Office decision label — the exact mapping the Office Review
+  /// screen uses (office_reports_screen.dart).
+  String _officeStatusLabel(String status) {
+    if (status == 'approved') return 'የጸደቀ';
+    if (status == 'revision_requested') return 'ማሻሻያ የተጠየቀበት';
+    if (status == 'rejected') return 'ውድቅ የተደረገ';
+    if (status == 'under_review') return 'በግምገማ ላይ';
+    return 'የቀረበ';
+  }
+
+  /// Office-decision status chip, same style as Office Review.
+  Widget _buildOfficeStatusChip(String status) {
+    final color = _officeStatusColor(status);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color, width: 0.8),
+      ),
+      child: Text(
+        _officeStatusLabel(status),
+        style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 11),
+      ),
+    );
+  }
+
   /// A report's occurrence date as an Ethiopian date string
   /// ("ጥቅምት 29, 2019"), or null when the report has no date.
   String? _ethiopianDateOfReport(Map<String, dynamic> report) {
@@ -1122,6 +1159,26 @@ class _PlanCalendarScreenState extends State<PlanCalendarScreen> {
                                   ),
                                   child: Text('የተከናወነ${monthReportDate != null ? ' ($monthReportDate)' : ''}፦ $doneText', style: TextStyle(fontSize: 11, color: Colors.green.shade900)),
                                 ),
+                              ],
+
+                              // 2026-11-28: the office decision on this
+                              // month's report — view-only, so the
+                              // department sees it on its own plan page.
+                              if (monthReport != null) ...[
+                                const SizedBox(height: 6),
+                                _buildOfficeStatusChip(
+                                  (monthReport['status'] ?? 'submitted').toString(),
+                                ),
+                                if ((monthReport['office_feedback'] ?? '')
+                                    .toString()
+                                    .trim()
+                                    .isNotEmpty) ...[
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    '💬 የፅ/ቤት አስተያየት፦ ${monthReport['office_feedback'].toString().trim()}',
+                                    style: TextStyle(fontSize: 11, color: Colors.grey.shade800),
+                                  ),
+                                ],
                               ],
 
                               if (notDoneText != null && notDoneText.isNotEmpty) ...[

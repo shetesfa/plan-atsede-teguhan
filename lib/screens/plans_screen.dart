@@ -43,6 +43,84 @@ class _PlansScreenState extends State<PlansScreen> {
   /// ለመለየት። null ማለት ስህተት የለም ማለት ነው።
   String? _serverError;
 
+  // 2026-11-28: every visible report, grouped by plan, so each plan
+  // card can show the office decision (status) and the office comment
+  // (office_feedback) on its latest report. Same pattern as the
+  // calendar screen. The server scopes the list to the user's own
+  // department (office / control see all).
+  Map<String, List<Map<String, dynamic>>> _reportsByPlan = {};
+
+  /// Load all visible reports once. A failure is silent — the card
+  /// simply shows no office chip.
+  Future<void> _loadReports() async {
+    try {
+      final data = await ApiService().getReports();
+      final grouped = <String, List<Map<String, dynamic>>>{};
+      for (final r in data) {
+        final planId = (r['plan_id'] ?? '').toString();
+        if (planId.isEmpty) continue;
+        grouped.putIfAbsent(planId, () => []).add(r);
+      }
+      if (mounted) setState(() => _reportsByPlan = grouped);
+    } catch (_) {}
+  }
+
+  /// The latest report of [item] (by occurrence date, then created_at).
+  Map<String, dynamic>? _latestReport(PlanItem item) {
+    final list = _reportsByPlan[item.id];
+    if (list == null || list.isEmpty) return null;
+    var best = list.first;
+    var bestKey = _reportSortKey(best);
+    for (final r in list.skip(1)) {
+      final key = _reportSortKey(r);
+      if (key.compareTo(bestKey) > 0) {
+        best = r;
+        bestKey = key;
+      }
+    }
+    return best;
+  }
+
+  String _reportSortKey(Map<String, dynamic> r) =>
+      '${(r['occurrence_date'] ?? '').toString()}|${(r['created_at'] ?? '').toString()}';
+
+  /// Office decision colour — the exact mapping the Office Review
+  /// screen uses (office_reports_screen.dart).
+  Color _officeStatusColor(String status) {
+    if (status == 'approved') return AppTheme.greenSuccess;
+    if (status == 'revision_requested') return Colors.orange;
+    if (status == 'rejected') return AppTheme.redDanger;
+    if (status == 'under_review') return Colors.purple;
+    return Colors.blue;
+  }
+
+  /// Office decision label — the exact mapping the Office Review
+  /// screen uses (office_reports_screen.dart).
+  String _officeStatusLabel(String status) {
+    if (status == 'approved') return 'የጸደቀ';
+    if (status == 'revision_requested') return 'ማሻሻያ የተጠየቀበት';
+    if (status == 'rejected') return 'ውድቅ የተደረገ';
+    if (status == 'under_review') return 'በግምገማ ላይ';
+    return 'የቀረበ';
+  }
+
+  /// Office-decision status chip, same style as Office Review.
+  Widget _buildOfficeStatusChip(String status) {
+    final color = _officeStatusColor(status);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color, width: 0.8),
+      ),
+      child: Text(
+        _officeStatusLabel(status),
+        style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 11),
+      ),
+    );
+  }
+
 
   @override
   void initState() {
@@ -60,6 +138,9 @@ class _PlansScreenState extends State<PlansScreen> {
     NotificationService().scheduleRemindersForPlans(widget.plans);
     // Month view: open on the month we are in.
     selectedMonthIndex = currentEthiopianMonthIndex();
+    // 2026-11-28: load the reports once, so each plan card can show
+    // the office decision + comment on its latest report.
+    _loadReports();
   }
 
   @override
@@ -175,6 +256,9 @@ class _PlansScreenState extends State<PlansScreen> {
       final fetchedPlans =
           remoteData.map((d) => PlanItem.fromDbJson(d)).toList();
       widget.onImportNewPlans(fetchedPlans);
+      // 2026-11-28: plans refreshed — reload the reports too, so the
+      // office chips stay in step with the plan list.
+      _loadReports();
       // ከመስመር ውጭ ሲሆን እቅዶቹ ከዚህ ካሽ ይታያሉ — ካሹን አዘምን።
       await OfflineSyncService.cachePlans(
           AuthService.currentDepartment?.id ?? 'admin', remoteData);
@@ -738,6 +822,10 @@ class _PlansScreenState extends State<PlansScreen> {
                                 item.updatedAt = DateTime.now();
 
                                 widget.onUpdatePlan(item);
+                                // 2026-11-28: a report was just submitted
+                                // — reload, so its 'submitted' office chip
+                                // shows on the card right away.
+                                _loadReports();
 
                                 if (submitted) {
                                   // ወደ ቴሌግራም ግሩፕ ይፋዊ ማሳወቂያ መላክ
@@ -1492,6 +1580,7 @@ class _PlansScreenState extends State<PlansScreen> {
       itemCount: filteredPlans.length,
       itemBuilder: (ctx, index) {
         final item = filteredPlans[index];
+        final latestReport = _latestReport(item);
         return Card(
           margin: const EdgeInsets.only(bottom: 12),
           elevation: item.isPostponed ? 2 : 1,
@@ -1673,6 +1762,27 @@ class _PlansScreenState extends State<PlansScreen> {
                       style: TextStyle(fontSize: 11, color: Colors.green.shade900),
                     ),
                   ),
+                ],
+
+                // 2026-11-28: the office decision on this plan's latest
+                // report — view-only, so the department sees approved /
+                // under review / revision / rejected + the office comment
+                // on its own plan page.
+                if (latestReport != null) ...[
+                  const SizedBox(height: 6),
+                  _buildOfficeStatusChip(
+                    (latestReport['status'] ?? 'submitted').toString(),
+                  ),
+                  if ((latestReport['office_feedback'] ?? '')
+                      .toString()
+                      .trim()
+                      .isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      '💬 የፅ/ቤት አስተያየት፦ ${latestReport['office_feedback'].toString().trim()}',
+                      style: TextStyle(fontSize: 11, color: Colors.grey.shade800),
+                    ),
+                  ],
                 ],
 
                 if (item.notDoneDetails != null && item.notDoneDetails!.isNotEmpty) ...[
