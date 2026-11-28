@@ -16,9 +16,12 @@ $auth = requireAuth(); // እያንዳንዱ ጥያቄ የግድ የተረጋገ
 $method = $_SERVER['REQUEST_METHOD'];
 $action = $_GET['action'] ?? '';
 
+// 2026-11-28: telegram_chat_id + telegram_linked (1 = linked, 0 = not)
+// — ጽ/ቤት ከተጠቃሚዎች ዝርዝር ማን Telegram እንዳገናኘ ማየት ይችላል።
 $userFields = "u.id, u.username, u.full_name, u.role_title, u.role, u.department_id,
                d.name AS department_name, d.short_name AS department_short_name,
-               u.status, u.phone, u.email, u.last_login, u.must_change_password, u.created_at";
+               u.status, u.phone, u.email, u.last_login, u.must_change_password, u.created_at,
+               u.telegram_chat_id, (u.telegram_chat_id IS NOT NULL AND TRIM(u.telegram_chat_id) <> '') AS telegram_linked";
 
 // 1. የተጠቃሚዎች ዝርዝር ማምጣት (GET — list, or single ?id=)
 if ($method === 'GET') {
