@@ -125,6 +125,8 @@ try {
     } elseif ($action === 'report_notice') {
         // የእቅድ ክንውን ሪፖርት ማሳወቂያ — ማንኛውም የገባ ተጠቃሚ፣
         // ግን ሪፖርቱ ሲሰጥ የራሱ ክፍል ሪፖርት መሆን አለበት።
+        // 2026-11-28: ቁጥጥር ማየት ብቻ ነው — የሌላ ክፍል ሪፖርት
+        // ማሳወቂያ መላክ አይችልም (የጽ/ቤት ወይም የራሱ ክፍል ብቻ)።
         $reportId = trim((string)($input['report_id'] ?? ''));
         if ($reportId !== '') {
             $stmt = $pdo->prepare("SELECT department_id FROM reports WHERE id = ? LIMIT 1");
@@ -133,7 +135,7 @@ try {
             if ($repDept === false) {
                 jsonError('ሪፖርቱ አልተገኘም', 404);
             }
-            if (empty($auth['is_super_admin']) && empty($auth['can_view_all']) && $auth['department_id'] !== $repDept) {
+            if (empty($auth['is_super_admin']) && $auth['department_id'] !== $repDept) {
                 jsonError('የሌላ ክፍል ሪፖርት ማሳወቂያ መላክ አይፈቀድም (Forbidden).', 403);
             }
         }
